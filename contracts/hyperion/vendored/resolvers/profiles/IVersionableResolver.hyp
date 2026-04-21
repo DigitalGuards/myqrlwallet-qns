@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: MIT
+// Generated from contracts/solidity/vendored/resolvers/profiles/IVersionableResolver.sol by scripts/sync-hyperion.js.
+// Edit the Solidity source, then re-run this script.
+pragma hyperion >=0.0;
+
+interface IVersionableResolver {
+    event VersionChanged(bytes32 indexed node, uint64 newVersion);
+
+    function recordVersions(bytes32 node) external view returns (uint64);
+}

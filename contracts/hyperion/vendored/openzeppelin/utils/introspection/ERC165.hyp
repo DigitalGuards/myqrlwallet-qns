@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+// Generated from contracts/solidity/vendored/openzeppelin/utils/introspection/ERC165.sol by scripts/sync-hyperion.js.
+// Edit the Solidity source, then re-run this script.
+pragma hyperion >=0.0;
+
+import "./IERC165.hyp";
+
+/// Minimal ERC-165 base for QNS. Matches OpenZeppelin v5 shape.
+abstract contract ERC165 is IERC165 {
+    function supportsInterface(bytes4 interfaceId) public view virtual returns (bool) {
+        return interfaceId == type(IERC165).interfaceId;
+    }
+}

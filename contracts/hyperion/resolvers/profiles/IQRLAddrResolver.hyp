@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Generated from contracts/solidity/resolvers/profiles/IQRLAddrResolver.sol by scripts/sync-hyperion.js.
+// Edit the Solidity source, then re-run this script.
+pragma hyperion >=0.0;
+
+/// @title IQRLAddrResolver
+/// @notice QRL-native address resolver profile. Stores and returns the full
+///         24-byte QRL wallet-display address form as `bytes`, in contrast to
+///         the legacy `IAddrResolver.addr(bytes32) returns (address)` which
+///         is a 20-byte EVM type.
+///
+/// See docs/ADDRESS-COMPATIBILITY.md for the Path A dual-stack rationale.
+interface IQRLAddrResolver {
+    /// @notice Emitted when the QRL address for a node changes. An empty
+    ///         `qrlAddress` indicates the record was cleared.
+    event QrlAddrChanged(bytes32 indexed node, bytes qrlAddress);
+
+    /// @notice Returns the 24-byte QRL wallet-display address associated
+    ///         with a node, or empty bytes if unset.
+    /// @param node The ENS/QNS namehash.
+    /// @return The 24-byte QRL address (with descriptor) or empty bytes.
+    function qrlAddr(bytes32 node) external view returns (bytes memory);
+}

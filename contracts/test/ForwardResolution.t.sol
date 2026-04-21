@@ -43,7 +43,8 @@ contract ForwardResolutionTest is Test {
         root.setSubnodeOwner(QRL_LABEL, address(fifs));
 
         // 4. Resolver that owners will point nodes at.
-        resolver = new QRLPublicResolver(registry);
+        // Forward-only tests: no reverse registrar trust needed.
+        resolver = new QRLPublicResolver(registry, address(0));
     }
 
     // -----------------------------------------------------------------

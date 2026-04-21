@@ -120,6 +120,12 @@ async function main() {
         loadAbi("QRLPublicResolver"),
         config.contracts.QRLPublicResolver
     );
+    const reverseRegistrar = config.contracts.ReverseRegistrar
+        ? new web3.qrl.Contract(
+              loadAbi("ReverseRegistrar"),
+              config.contracts.ReverseRegistrar
+          )
+        : null;
 
     // namehash via concatenated-bytes32 keccak256 (EIP-137)
     const ROOT = "0x" + "00".repeat(32);
@@ -170,9 +176,27 @@ async function main() {
     }
 
     // ------------------------------------------------------------
-    // 3. Store qrlAddr on the resolver (skip if already correct)
+    // 3a. Store legacy `addr` (20-byte EVM) so forward-confirm works for reverse
     // ------------------------------------------------------------
-    console.log("\n[3/4] resolver.setQrlAddr");
+    console.log("\n[3a/6] resolver.setAddr (legacy 20-byte, for forward-confirm)");
+    const currentLegacyAddr = await resolver.methods.addr(node).call();
+    const wantLegacy = account.address.toLowerCase();
+    if (currentLegacyAddr && currentLegacyAddr.toLowerCase().replace(/^q/, "0x") === wantLegacy) {
+        console.log(`  skip: addr already = ${currentLegacyAddr}`);
+    } else {
+        await sendTx(
+            web3,
+            resolver,
+            resolver.methods.setAddr(node, account.address),
+            account,
+            "resolver.setAddr"
+        );
+    }
+
+    // ------------------------------------------------------------
+    // 3b. Store qrlAddr on the resolver (skip if already correct)
+    // ------------------------------------------------------------
+    console.log("\n[3b/6] resolver.setQrlAddr");
     const existing = await resolver.methods.qrlAddr(node).call();
     if (existing && existing.toLowerCase() === sentinelHex.toLowerCase()) {
         console.log(`  skip: qrlAddr already set to ${existing}`);
@@ -189,25 +213,48 @@ async function main() {
     }
 
     // ------------------------------------------------------------
-    // 4. Resolve via @qns/sdk (the real API consumers will use)
+    // 4. Reverse: set deployer's addr.reverse primary name to this name
     // ------------------------------------------------------------
-    console.log("\n[4/4] resolve via @qns/sdk");
-    const { resolveName, getResolver, namehash, nodeToHex } = require(path.join(sdkDistDir, "index.js"));
+    const fullName = `${nameLabel}.${config.tld}`;
+    if (reverseRegistrar) {
+        console.log("\n[4/6] reverseRegistrar.setName");
+        const reverseNode = await reverseRegistrar.methods.node(account.address).call();
+        const existingName = await resolver.methods.name(reverseNode).call();
+        if (existingName === fullName) {
+            console.log(`  skip: reverse already = ${existingName}`);
+        } else {
+            console.log(`  current: "${existingName || ""}" -> "${fullName}"`);
+            await sendTx(
+                web3,
+                reverseRegistrar,
+                reverseRegistrar.methods.setName(fullName),
+                account,
+                "reverseRegistrar.setName"
+            );
+        }
+    } else {
+        console.log("\n[4/6] reverse: ReverseRegistrar not in config — skipping");
+    }
+
+    // ------------------------------------------------------------
+    // 5. Forward resolve via @qns/sdk
+    // ------------------------------------------------------------
+    console.log("\n[5/6] SDK forward resolve");
+    const sdk = require(path.join(sdkDistDir, "index.js"));
     const provider = makeSdkProvider(web3);
     const cfg = { registry: config.contracts.ENSRegistry, provider };
 
-    const fullName = `${nameLabel}.${config.tld}`;
-    const sdkNode = nodeToHex(namehash(fullName));
+    const sdkNode = sdk.nodeToHex(sdk.namehash(fullName));
     console.log(`  SDK namehash:    ${sdkNode}`);
     console.log(`  Local namehash:  ${node}`);
     if (sdkNode.toLowerCase() !== node.toLowerCase()) {
         throw new Error("SDK and web3 namehash disagree");
     }
 
-    const resolverFromSdk = await getResolver(fullName, cfg);
+    const resolverFromSdk = await sdk.getResolver(fullName, cfg);
     console.log(`  SDK getResolver: ${resolverFromSdk}`);
 
-    const bytes = await resolveName(fullName, cfg);
+    const bytes = await sdk.resolveName(fullName, cfg);
     if (bytes === null) {
         console.log("  resolveName: null");
     } else {
@@ -220,8 +267,31 @@ async function main() {
         }
     }
 
+    // ------------------------------------------------------------
+    // 6. Reverse resolve via @qns/sdk
+    // ------------------------------------------------------------
+    if (reverseRegistrar) {
+        console.log("\n[6/6] SDK reverse resolve");
+        const reverseName = await sdk.lookupAddress(account.address, cfg);
+        console.log(`  lookupAddress:   ${reverseName}`);
+        if (reverseName !== fullName) {
+            throw new Error(
+                `MISMATCH: lookupAddress returned "${reverseName}", expected "${fullName}"`
+            );
+        }
+        const verified = await sdk.verifyReverse(account.address, cfg);
+        console.log(`  verifyReverse:   ${verified}`);
+        if (verified !== fullName) {
+            throw new Error(
+                `MISMATCH: verifyReverse returned "${verified}", expected "${fullName}" — forward-confirm failed`
+            );
+        }
+    } else {
+        console.log("\n[6/6] SDK reverse resolve: skipped (no ReverseRegistrar deployed)");
+    }
+
     console.log("\n" + "=".repeat(60));
-    console.log(`OK: ${fullName} resolves correctly end-to-end.`);
+    console.log(`OK: ${fullName} resolves end-to-end (forward + reverse + forward-confirm).`);
     console.log("=".repeat(60));
 }
 

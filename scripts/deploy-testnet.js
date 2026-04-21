@@ -17,34 +17,55 @@ const { loadDeployer } = require("./lib/loadDeployer");
 
 const repoRoot = path.join(__dirname, "..");
 const configPath = path.join(repoRoot, "config", "testnet.json");
-const outDir = path.join(repoRoot, "out");
+const foundryOutDir = path.join(repoRoot, "out");
+const hyperionArtifactsDir = path.join(repoRoot, "build", "hyperion");
+
+// "hyperion" (preferred, canonical for mainnet per QRL team recommendation)
+// or "foundry" (falls back to solc bytecode). Env override:
+//   BUILD=foundry npm run deploy:testnet
+const BUILD_TARGET = (process.env.BUILD || "hyperion").toLowerCase();
 
 function loadJson(p) {
     return JSON.parse(fs.readFileSync(p, "utf8"));
 }
 
-function loadArtifact(contractName) {
-    // Foundry output is at out/<file>.sol/<ContractName>.json, file name
-    // matches the Solidity file basename.
-    const candidates = [
-        `${contractName}.sol/${contractName}.json`,
-    ];
-    for (const relPath of candidates) {
-        const artifactPath = path.join(outDir, relPath);
-        if (fs.existsSync(artifactPath)) {
-            const artifact = loadJson(artifactPath);
-            if (!artifact.bytecode || !artifact.bytecode.object) {
-                throw new Error(`Artifact ${relPath} has no bytecode.object`);
-            }
-            return {
-                abi: artifact.abi,
-                bytecode: artifact.bytecode.object,
-            };
-        }
-    }
-    throw new Error(
-        `Foundry artifact not found for ${contractName}. Run \`forge build\` first.`
+function loadFoundryArtifact(contractName) {
+    const artifactPath = path.join(
+        foundryOutDir,
+        `${contractName}.sol`,
+        `${contractName}.json`
     );
+    if (!fs.existsSync(artifactPath)) {
+        throw new Error(
+            `Foundry artifact not found: ${artifactPath}. Run \`forge build\` first.`
+        );
+    }
+    const artifact = loadJson(artifactPath);
+    if (!artifact.bytecode || !artifact.bytecode.object) {
+        throw new Error(`Foundry artifact ${contractName} has no bytecode.object`);
+    }
+    return { abi: artifact.abi, bytecode: artifact.bytecode.object };
+}
+
+function loadHyperionArtifact(contractName) {
+    const abiPath = path.join(hyperionArtifactsDir, `${contractName}.abi`);
+    const binPath = path.join(hyperionArtifactsDir, `${contractName}.bin`);
+    if (!fs.existsSync(abiPath) || !fs.existsSync(binPath)) {
+        throw new Error(
+            `Hyperion artifact missing for ${contractName} ` +
+                `(expected ${abiPath} + ${binPath}). ` +
+                `Run \`node scripts/compile-hyperion.js\` first.`
+        );
+    }
+    const abi = loadJson(abiPath);
+    const bytecode = `0x${fs.readFileSync(binPath, "utf8").trim()}`;
+    return { abi, bytecode };
+}
+
+function loadArtifact(contractName) {
+    return BUILD_TARGET === "foundry"
+        ? loadFoundryArtifact(contractName)
+        : loadHyperionArtifact(contractName);
 }
 
 function getAccount(web3) {
@@ -106,15 +127,22 @@ function namehash(name, web3) {
     return node;
 }
 
+// Subnode = keccak(parent || labelhash(label)).
+function subnode(parentNode, label, web3) {
+    const l = web3.utils.keccak256(label);
+    return web3.utils.keccak256("0x" + parentNode.slice(2) + l.slice(2));
+}
+
 async function main() {
     const config = loadJson(configPath);
 
     console.log("=".repeat(60));
-    console.log("QNS Phase 1 Testnet Deployment");
+    console.log("QNS Testnet Deployment");
     console.log("=".repeat(60));
-    console.log(`Provider: ${config.rpcUrl}`);
+    console.log(`Provider:        ${config.rpcUrl}`);
     console.log(`Expected chainId: ${config.chainId}`);
-    console.log(`TLD: .${config.tld}`);
+    console.log(`TLD:             .${config.tld}`);
+    console.log(`Build target:    ${BUILD_TARGET} (override with BUILD=foundry|hyperion)`);
 
     const web3 = new Web3(config.rpcUrl);
     const chainId = await web3.qrl.getChainId();
@@ -177,23 +205,73 @@ async function main() {
     );
 
     // ------------------------------------------------------------
-    // 4. QRLPublicResolver — no wiring needed, any registrant can point at it.
+    // 4. Wire addr.reverse namespace.
+    //    - Deployer temporarily owns `reverse` so it can create the `addr` subnode.
+    //    - Deploy ReverseRegistrar(registry).
+    //    - Point reverse.addr node at reverseRegistrar.
+    // ------------------------------------------------------------
+    console.log("\nWiring addr.reverse namespace...");
+    await sendTx(
+        root.methods.setSubnodeOwner(
+            labelhash("reverse", web3),
+            account.address
+        ),
+        account,
+        'root.setSubnodeOwner(labelhash("reverse"), deployer)'
+    );
+
+    const reverseRegistrar = await deployContract(
+        web3,
+        account,
+        "ReverseRegistrar",
+        [registry.options.address]
+    );
+
+    const reverseNode = namehash("reverse", web3);
+    await sendTx(
+        registry.methods.setSubnodeOwner(
+            reverseNode,
+            labelhash("addr", web3),
+            reverseRegistrar.options.address
+        ),
+        account,
+        'registry.setSubnodeOwner(reverse, labelhash("addr"), reverseRegistrar)'
+    );
+
+    // ------------------------------------------------------------
+    // 5. QRLPublicResolver(registry, reverseRegistrar) — trusts the
+    //    reverseRegistrar as an authorised setName() caller.
     // ------------------------------------------------------------
     const resolver = await deployContract(web3, account, "QRLPublicResolver", [
         registry.options.address,
+        reverseRegistrar.options.address,
     ]);
+
+    // ------------------------------------------------------------
+    // 6. Point reverseRegistrar's defaultResolver at QRLPublicResolver.
+    // ------------------------------------------------------------
+    await sendTx(
+        reverseRegistrar.methods.setDefaultResolver(resolver.options.address),
+        account,
+        "reverseRegistrar.setDefaultResolver(resolver)"
+    );
 
     // ------------------------------------------------------------
     // Persist addresses.
     // ------------------------------------------------------------
+    if (config.contracts && Object.values(config.contracts).some(Boolean)) {
+        config.previousContracts = config.contracts;
+    }
     config.contracts = {
         ENSRegistry: registry.options.address,
         Root: root.options.address,
         FIFSQRLRegistrar: fifs.options.address,
+        ReverseRegistrar: reverseRegistrar.options.address,
         QRLPublicResolver: resolver.options.address,
     };
     config.deployedAt = new Date().toISOString();
     config.deployer = account.address;
+    config.buildTarget = BUILD_TARGET;
 
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 
@@ -202,7 +280,7 @@ async function main() {
     console.log(`  ${configPath}`);
     console.log("=".repeat(60));
     for (const [name, addr] of Object.entries(config.contracts)) {
-        console.log(`  ${name.padEnd(20)} ${addr}`);
+        console.log(`  ${name.padEnd(22)} ${addr}`);
     }
 }
 

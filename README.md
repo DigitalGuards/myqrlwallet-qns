@@ -21,8 +21,8 @@ Beyond name resolution, QNS adds a **pubkey resolver record** for publishing ML-
 ┌──────────────────────────────────────────────────────────────┐
 │                      @qns/sdk (qnsjs)                        │
 │  - namehash (keccak256, EIP-137)                             │
-│  - resolver walk via registry > resolver                     │
-│  - provider: @theqrl/qrl_providers (EIP-1193 window.qrl)     │
+│  - registry > resolver walk, forward + reverse (ENSIP-19)    │
+│  - provider: any EIP-1193 (recommended: @qrlwallet/connect)  │
 └───────────────────────────┬──────────────────────────────────┘
                             │ eth_call
                             ▼
@@ -92,7 +92,7 @@ cd sdk && npm install && npm run build && npm test
 
 - **ENS reference**: [ensdomains/ens-contracts](https://github.com/ensdomains/ens-contracts), [docs.ens.domains](https://docs.ens.domains)
 - **Crypto**: [theQRL/qrypto.js](https://github.com/theQRL/qrypto.js), `@theqrl/mldsa87` v1.1.1 (Halborn-audited 2026-03-31)
-- **Provider**: `@theqrl/qrl_providers` (EIP-1193 `window.qrl`)
+- **Provider**: [`@qrlwallet/connect`](https://github.com/DigitalGuards/myqrlwallet-connect) v2+ (post-quantum ML-KEM-768 dApp↔wallet session, EIP-1193)
 - **Workspace sibling**: [`../QuantaPool`](../QuantaPool) shares the Foundry + Hyperion toolchain pattern
 
 ## License

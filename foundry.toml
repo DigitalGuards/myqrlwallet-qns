@@ -12,7 +12,7 @@ optimizer_runs = 200
 # will be copied in during Phase 1 from a pinned ensdomains/ens-contracts commit
 # — see contracts/solidity/vendored/README.md.
 remappings = [
-    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "@openzeppelin/contracts/=contracts/solidity/vendored/openzeppelin/",
     "@ensdomains/=contracts/solidity/vendored/",
     "forge-std/=lib/forge-std/src/",
 ]
