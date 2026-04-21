@@ -1,0 +1,46 @@
+{
+  "name": "@qns/sdk",
+  "version": "0.1.0-alpha.0",
+  "description": "QRL Name Service client SDK — forward/reverse resolution for QRL Zond",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "qrl",
+    "qns",
+    "ens",
+    "naming",
+    "post-quantum"
+  ],
+  "author": "DigitalGuards",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "@noble/hashes": "^1.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^1.5.0"
+  },
+  "peerDependencies": {
+    "@theqrl/mldsa87": "^1.1.1",
+    "@theqrl/qrl_providers": "^1.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@theqrl/mldsa87": {
+      "optional": true
+    },
+    "@theqrl/qrl_providers": {
+      "optional": true
+    }
+  }
+}

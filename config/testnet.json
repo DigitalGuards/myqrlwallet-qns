@@ -1,0 +1,23 @@
+{
+  "network": "qrl-zond-testnet-v2",
+  "chainId": 1337,
+  "rpcUrl": "https://qrlwallet.com/api/qrl-rpc/testnet",
+  "fallbackRpcUrl": "http://46.224.165.196:8545",
+  "beaconUrl": "http://46.224.165.196:3500",
+  "tld": "qrl",
+  "coinType": "0x80000539",
+  "coinTypeDerivation": "0x80000000 | chainId (ENSIP-11)",
+  "contracts": {
+    "ENSRegistry": null,
+    "Root": null,
+    "PublicResolver": null,
+    "FIFSQRLRegistrar": null,
+    "ReverseRegistrar": null,
+    "UniversalResolver": null
+  },
+  "notes": [
+    "Contracts are null until Phase 1 deploys — see docs/ROADMAP.md.",
+    "chainId 1337 is the current Testnet V2 value per ../QuantaPool/CLAUDE.md — confirm with qrl_chainId before deploy (OPEN-QUESTIONS.md #3).",
+    "coinType 0x80000539 is derived from chainId 1337; re-derive if chainId changes."
+  ]
+}

@@ -1,0 +1,27 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Foundry build artifacts
+cache/
+out/
+broadcast/
+
+# Hyperion build artifacts
+build/hyperion/
+
+# Node
+node_modules/
+sdk/dist/
+sdk/node_modules/
+
+# Editor / agent
+.claude/
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
