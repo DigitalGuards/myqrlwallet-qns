@@ -1,85 +1,124 @@
 # Open Questions Blocking QNS Implementation
 
-Seven load-bearing unknowns must be resolved with QRL core developers (Discord, GitHub Discussions, or the QIP process) before Phase 1 contracts deploy. Target: 1–2 week pre-implementation discovery spike.
+Seven load-bearing unknowns for Phase 1 deployment. Status column updated 2026-04-21.
 
-Each item below lists (a) the question, (b) what its answer affects, (c) how to resolve it.
+| # | Question | Status |
+|---|---|---|
+| 1 | Hyperion `address` type width | **ANSWERED** (20 bytes, verified in source) |
+| 2 | ML-DSA-87 verification precompile | Waiting for dev input |
+| 3 | Testnet V2 chainId | **ANSWERED** (1337 = `0x539`, verified via RPC) |
+| 4 | `msg.sender` bytes: include descriptor? | Unknown (follow-up on Q1 finding) |
+| 5 | TLD choice | **ANSWERED** (`.qrl` per user 2026-04-21, still needs QIP to formalize) |
+| 6 | `ecrecover` retained on Zond? | **ANSWERED** (removed per QRL dev: "ECDSA has NO place") |
+| 7 | `zondjs` readiness vs direct `@theqrl/qrl_providers` | User building own SDK in `myqrlwallet-connect`; target providers directly |
 
-## 1. Hyperion `address` type width
+---
 
-**Q:** Does Hyperion redefine the Solidity `address` type from 20 bytes to 24 bytes, or does it preserve 20-byte `address` and expose QRL's full 24 bytes only via `bytes`/structs?
+## 1. Hyperion `address` type width: ANSWERED (20 bytes)
 
-**Affects:** Whether every `address` field in vendored ENS compiles unmodified (Path A, preferred) or whether the registry needs wholesale retyping (Path B — forks ENS more aggressively). This is the single most important answer.
+**Finding (2026-04-21):** Hyperion preserves the 20-byte Solidity `address` type.
 
-**How to resolve:** Read `hyperion/libsolidity/ast/Types.h` / `Types.cpp` in `/home/waterfall/myqrlwallet/hyperion`. Ask on `#hyperion-dev` in QRL Discord. Write a sentinel contract `contract T { address a = 0x...; }` and inspect `hypc --ast-compact-json` output for the declared width.
+Verified in `/home/waterfall/myqrlwallet/hyperion/libhyperion/ast/Types.h:455-456`:
+
+```cpp
+unsigned calldataEncodedSize(bool _padded = true) const override { return _padded ? 32 : 160 / 8; }
+unsigned storageBytes() const override { return 160 / 8; }
+```
+
+`160/8 = 20`. Storage and unpadded-calldata sizes are both 20 bytes, matching Ethereum. Padded size is 32 bytes (EVM word), also matching.
+
+**Implication:** Vendored ENS contracts compile unmodified. Path A (dual-stack resolver) works cleanly:
+- `msg.sender` on-chain is the 20-byte EVM address.
+- Wallet-displayed 24-byte "Q-prefixed" address format is a wallet-layer representation (likely descriptor + EVM address), not the EVM `address` type.
+- `addr(bytes32) returns (address)` returns the real 20-byte EVM address, not a "lossy shim".
+- `qrlAddr(bytes32) returns (bytes)` stores the full 24-byte wallet-display form when a user wants the display-format preserved.
+
+The Q4 descriptor question becomes: "how does the 20-byte EVM `msg.sender` relate to the 24-byte wallet-display form?" (i.e., is the 24-byte form `[descriptor][20-byte-evm-address][?]` or something else?). That's now the remaining address-layer open question.
 
 ## 2. ML-DSA-87 verification precompile
 
 **Q:** Is there a precompile on Zond for ML-DSA-87 signature verification? If yes: at what address, with what ABI, at what gas cost?
 
-**Affects:** Phase 4 (signed records, ENSIP-19 sig reverse, CCIP-Read) is tractable with a precompile and infeasible without one (in-EVM verifier costs 5–10M gas per verify).
+**Status:** Waiting for QRL dev input.
 
-**How to resolve:** Grep `/home/waterfall/myqrlwallet/go-qrl` for `PrecompiledContract` registrations and MLDSA references. Ask on `#go-qrl` Discord. If missing, open a QIP proposing inclusion before mainnet freeze — this is a one-shot opportunity.
+**Affects:** Phase 4 (signed records, ENSIP-19 sig reverse, CCIP-Read) is tractable with a precompile and infeasible without one.
 
-## 3. Testnet V2 and mainnet chainId
+**How to resolve:** Grep `/home/waterfall/myqrlwallet/go-qrl` for `PrecompiledContract` registrations and MLDSA references. Ask QRL core-devs. If missing, open a QIP proposing inclusion before mainnet freeze.
 
-**Q:** Confirmed chainId for Testnet V2? Planned chainId for mainnet?
+## 3. Testnet V2 chainId: ANSWERED (1337)
 
-**Affects:** ENSIP-11 coinType derivation (`0x80000000 | chainId`) — used for multichain `addr` and per-chain reverse namespace. Hard-coded in resolver config, so changing it post-deployment requires redeployment.
+**Finding (2026-04-21):** `qrl_chainId` returns `0x539` = 1337 on `https://qrlwallet.com/api/qrl-rpc/testnet`.
 
-**Current working assumption:** `1337` for Testnet V2 per `../QuantaPool/CLAUDE.md`. Mainnet unknown.
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"qrl_chainId","params":[],"id":1}' \
+  https://qrlwallet.com/api/qrl-rpc/testnet
+# → {"jsonrpc":"2.0","id":...,"result":"0x539"}
+```
 
-**How to resolve:** Query `qrl_chainId` on the testnet RPC; cross-check with `go-qrl/params/config.go`. Ask QRL team for mainnet chainId commitment before Phase 5.
+**Derived:** ENSIP-11 coinType for Testnet V2 = `0x80000000 | 1337` = `0x80000539`.
 
-## 4. On-chain address representation — descriptor included or excluded?
+**Mainnet chainId:** Still unknown. Must confirm before Phase 5 mainnet deployment.
 
-**Q:** When a contract reads `msg.sender`, does it get the 24-byte native address *with* the 3-byte cryptographic descriptor or *without*? (The post-April-2025 go-qrllib refactor separates the descriptor; where does the separation land at the EVM boundary?)
+## 4. On-chain address representation: descriptor relationship to 20-byte EVM address
 
-**Affects:** `sha3QRLAddress` for reverse-namespace computation must hash **exactly** what `msg.sender` produces on-chain. A mismatch means the reverse lookup computes the wrong node and reverse resolution silently fails.
+**Q (refined post-Q1 finding):** The EVM `address` is 20 bytes. The wallet-displayed QRL address is 24 bytes (Q-prefix + 40-hex = 20 bytes of the display, plus 3-byte descriptor held separately). What is the exact mapping between the 20-byte EVM address and the 24-byte wallet-display bytes?
 
-**How to resolve:** Deploy a trivial `contract T { function me() view returns (bytes memory) { return abi.encodePacked(msg.sender); } }` on testnet and inspect the return. Cross-check against the address format definition in `/home/waterfall/myqrlwallet/go-qrl/common/address.go`.
+**Possibilities:**
+- (a) The 20-byte EVM address is the **last 20 bytes of the 24-byte wallet form**, with the 3-byte descriptor prepended at the wallet layer.
+- (b) The 24-byte wallet form is independent (hash or derivation) and maps to a 20-byte EVM address via a well-defined function.
+- (c) Something else.
 
-## 5. TLD choice — `.qrl` vs `.q` vs alternatives
+**Affects:** Whether `qrlAddr(bytes32) returns (bytes)` stores the 24-byte form or derives it from the 20-byte EVM address, and how the reverse-namespace `sha3QRLAddress` works.
 
-**Q:** Which TLD does the QRL ecosystem want? `.qrl` (aligned with post-Zond rebrand), `.q` (shortest), `.zond` (pre-rebrand), `.qns` (self-referential)?
+**How to resolve:** Inspect `/home/waterfall/myqrlwallet/go-qrl/common/address.go` or equivalent for the address-format definition. Deploy a trivial `contract T { function me() view returns (address) { return msg.sender; } }` and compare its return to the wallet's displayed address for the same signer.
 
-**Affects:** Everything. TLD is baked into the deployed `FIFSQRLRegistrar`'s owned label and cannot be changed without a migration.
+## 5. TLD choice: ANSWERED (.qrl)
 
-**Current recommendation:** `.qrl`. Aligns with brand, unambiguous, matches SDK naming.
+**Decision (2026-04-21, user):** `.qrl`.
 
-**How to resolve:** Submit as the first naming-related QIP under the QEP track. Coordinate with QIP custodians (jackalyst, fr1t2, jplomas). Budget 2–4 weeks for community review.
+Aligns with post-Zond rebrand, unambiguous. FIFS registrar in Phase 1 will own the `.qrl` label in the root registry.
 
-## 6. `ecrecover` retained on Zond?
+**Still outstanding:** Formalize via QIP under the QEP track. Coordinate with QIP custodians (jackalyst, fr1t2, jplomas). This can happen in parallel with Phase 1 contract development.
 
-**Q:** Is precompile `0x01` (`ecrecover`) retained on Zond for ported Ethereum contract compatibility, or removed because ECDSA has no place in a post-quantum chain?
+## 6. ecrecover on Zond: ANSWERED (removed)
 
-**Affects:** Every OpenZeppelin contract using `ECDSA.recover`, every EIP-712 consumer, every contract that dependencies assume is callable — not just QNS/ENS.
+**Finding (2026-04-21, per QRL dev):** "ECDSA has NO place" on Zond. The `ecrecover` precompile (`0x01`) is removed. Keccak256 and SHA3 remain.
 
-**How to resolve:** Check `/home/waterfall/myqrlwallet/go-qrl` precompile registrations. If removed: audit vendored ENS for any `ecrecover` use (should be only ENSIP-19 signature variants) and plan replacement with ML-DSA verifier.
+**Implication:** Vendored ENS code that uses `ECDSA.recover` (OpenZeppelin, ENSIP-19 signature reverse) will **not** link. Audit vendored contracts for any `ecrecover` use:
 
-## 7. `zondjs` / SDK target
+- `ENSRegistry.sol`, `Root.sol`, `PublicResolver.sol`, `ReverseRegistrar.sol`, `UniversalResolver.sol` — all use `msg.sender` only. Should port cleanly.
+- `SignatureReverseRegistrar` / ENSIP-19 signature variants — use `ecrecover`. **Must be replaced** with ML-DSA-87 verification (Phase 4, contingent on precompile).
+- OpenZeppelin `ECDSA.recover` consumers — not used in the minimal QNS vendoring scope.
 
-**Q:** What's the status of `zondjs` (successor to archived `@theqrl/web3`)? Is it stable enough to be a QNS SDK dependency, or should QNS target the lower-level `@theqrl/qrl_providers` EIP-1193 interface directly?
+**Phase 4 consequence:** Without `ecrecover`, *and* without an ML-DSA precompile, ENSIP-19 signature-based reverse cannot be implemented on-chain cheaply. Fallback: CCIP-Read-style off-chain signed gateway, or defer signature-based reverse indefinitely and rely on `msg.sender`-based `setName()`.
 
-**Affects:** `@qns/sdk` dependencies and API ergonomics. `@theqrl/web3` was archived 2023-10; `zondjs` is in development for Vortex IDE.
+## 7. SDK target: ANSWERED (direct `@theqrl/qrl_providers`)
 
-**Current decision:** Target `@theqrl/qrl_providers` (EIP-1193 `window.qrl`) as a minimal interface. Lift to `zondjs` when stable.
+**Finding (2026-04-21, user):** User is building their own SDK in `myqrlwallet-connect`. `zondjs` is not the target.
 
-**How to resolve:** Check `theQRL/zondjs` repo status on GitHub. If stable by Phase 1, switch `@qns/sdk` to use it.
+**Implication:** `@qns/sdk` targets `@theqrl/qrl_providers` EIP-1193 `window.qrl` interface directly, as currently scaffolded. No change to the SDK plan.
+
+**Potential integration:** `myqrlwallet-connect` and `@qns/sdk` may cross-integrate in Phase 2/3. Keep `@qns/sdk` dependency-minimal so either SDK can consume it.
 
 ---
 
 ## Secondary (non-blocking) questions
 
-| # | Question | Recommendation |
-|---|---|---|
-| 8 | ENSv2 per-name sub-registry architecture — adopt or skip? | **Skip.** Spec unfinalized; v1 is stable and audited. |
-| 9 | XMSS pubkey support in `IPubkeyResolver` alongside ML-DSA? | **ML-DSA only.** XMSS deprecated for validators (still available for wallets); single standard in QNS simpler. |
-| 10 | Tokenize names as QRC-721 from day one? | **No.** Defer until QRC-721 standard is finalized (Phase 5+). |
+| # | Question | Recommendation | Status |
+|---|---|---|---|
+| 8 | ENSv2 per-name sub-registry architecture — adopt or skip? | Skip; v1 is stable | Decided |
+| 9 | XMSS pubkey support alongside ML-DSA in `IPubkeyResolver`? | ML-DSA only | Decided |
+| 10 | Tokenize names as QRC-721 from day one? | No; defer to Phase 5+ | Decided |
 
 ---
 
-Resolution log — fill in as answers arrive:
+## Resolution log
 
 ```
-[YYYY-MM-DD] #N answered by <source>: <answer summary>
+2026-04-21  Q1 answered: Hyperion preserves 20-byte address (source inspection, libhyperion/ast/Types.h:455-456)
+2026-04-21  Q3 answered: chainId 1337 (qrl_chainId RPC call returned 0x539)
+2026-04-21  Q5 answered: TLD = .qrl (user decision, QIP pending)
+2026-04-21  Q6 answered: ecrecover removed on Zond (QRL dev: "ECDSA has NO place")
+2026-04-21  Q7 answered: SDK targets @theqrl/qrl_providers directly (user building own SDK in myqrlwallet-connect)
 ```
