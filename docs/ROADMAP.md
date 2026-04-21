@@ -1,88 +1,98 @@
 # QNS Roadmap
 
-Phase targets are best-effort; gating factors are called out per phase. Dates assume work starts once the Phase 1 open questions (see `OPEN-QUESTIONS.md`) are resolved.
+Live status as of 2026-04-21. Per-phase gating factors called out explicitly.
 
-## Phase 0 — Alpha scaffolding *(this milestone)*
-
-**Goal:** repository, docs, toolchain skeleton, port plan published.
+## Phase 0: Alpha scaffolding — **COMPLETE**
 
 - [x] GitHub repo `DigitalGuards/myqrlwallet-qns` created, added to workspace as submodule.
 - [x] Foundry + Hyperion directory layout matching `QuantaPool` conventions.
 - [x] SDK skeleton with working `namehash()`.
 - [x] Docs: port plan, address-compat, crypto-integration, roadmap, open questions.
-- [ ] QIP draft submitted to `theQRL/qips` (post-scaffolding).
+- [ ] QIP draft submitted to `theQRL/qips` (still pending; non-blocking).
 
-## Phase 1 — Forward resolution on Testnet V2
+## Phase 1: Forward resolution on Testnet V2 — **COMPLETE**
 
-**Target:** 4–6 weeks after open-questions resolved.
-**Gating:** Hyperion `address` type width, chainId, descriptor bytes (OPEN-QUESTIONS #1, #3, #4).
+Shipped 2026-04-21. All 5 open-question gates answered or resolved.
 
-- Vendor `ensdomains/ens-contracts` at a pinned Q4 2025 commit under `contracts/solidity/vendored/`.
-- Deploy: `ENSRegistry`, `Root`, `FIFSQRLRegistrar` (owning `.qrl`), `PublicResolver` with `IQRLAddrResolver` profile.
-- Exclude: NameWrapper, `ETHRegistrarController`, `BaseRegistrarImplementation`, DNSSEC.
-- SDK: `resolveName(name) → bytes24` via registry-walk → resolver → `qrlAddr(node)`.
-- Validation: register 5+ test names via FIFS; round-trip resolve from the sample dApp.
+- [x] Vendored `ensdomains/ens-contracts@v1.6.2` (commit `3d477d4`) under `contracts/solidity/vendored/`.
+- [x] Deployed: `ENSRegistry`, `Root`, `FIFSQRLRegistrar` (owns `.qrl`), `QRLPublicResolver` (with `IQRLAddrResolver` profile).
+- [x] Excluded: NameWrapper, `ETHRegistrarController`, `BaseRegistrarImplementation`, DNSSEC (per plan).
+- [x] SDK: `resolveName(name) -> bytes24` walking registry -> resolver -> `qrlAddr(node)`.
+- [x] Validation: `alice.qrl` and `bob.qrl` registered via FIFS; round-trip resolve through SDK against live testnet.
+- [x] Deploy path via Hyperion (`hypc`) as canonical; solc bytecode works but Hyperion is the QRL-team-recommended mainnet path.
 
-**Output:** deployable contracts, published `@qns/sdk` alpha, one-page demo.
+**Live addresses** (in `config/testnet.json`):
+- `ENSRegistry`: `Qd812032246Fc1e53f5eC392c325b1B4A8C0C2f92`
+- `Root`: `Qd973B4504D432916650EB26A83bCB1E0cbE6Bb4B`
+- `FIFSQRLRegistrar`: `Qcc731b748292BA5af2F49F342783986fAe6C68F6`
+- `QRLPublicResolver`: `Q77008762334bE497f61722d74115B91A70bBfD91`
 
-## Phase 2 — Reverse resolution + UniversalResolver
+## Phase 2: Reverse resolution — **COMPLETE**
 
-**Target:** 3–4 weeks after Phase 1.
-**Gating:** none (builds on Phase 1).
+Shipped 2026-04-21 alongside Phase 1 redeploy.
 
-- Deploy `ReverseRegistrar`, wire `addr.reverse` per ENSIP-19 per-chain form with QRL Zond coinType `0x80000000 | chainId`.
-- Deploy `UniversalResolver` with stub batch-gateway provider.
-- SDK: `lookupAddress(qrlAddr) → string` with ENS-mandated forward-confirm.
-- Defer signature-based `setNameForAddrWithSignature` to Phase 4 — basic `setName` path uses `msg.sender` (no ML-DSA needed).
+- [x] `ReverseRegistrar` vendored + OZ-v5 patched. Deployed and assigned `addr.reverse`.
+- [x] `QRLPublicResolver` extended with `INameResolver` (`name` / `setName`) and a `trustedReverseRegistrar` constructor arg so reverseRegistrar can write reverse records.
+- [x] SDK: `lookupAddress(addrHex) -> string` walking registry -> resolver -> `name(reverseNode)` using standard ENSIP-19 `sha3HexAddress` (keccak of 40-char lowercase hex of 20-byte address).
+- [x] SDK: `verifyReverse(addrHex) -> string | null` performs forward-confirm against legacy `addr(bytes32)` before returning.
+- [x] Validation: `alice.qrl` reverse set for deployer address; round-trip through SDK end-to-end.
 
-**Output:** primary-name support end-to-end, single-RPC UniversalResolver lookups.
+**Live reverse registrar**: `QF1f50E5b74671Ef90Bc515d3beb46d2Ea55e7a70`.
 
-## Phase 3 — Records: text, contenthash, multichain
+UniversalResolver (single-RPC multi-call) **deferred** to Phase 3 — not needed for alpha UX; useful once we have batch read patterns.
 
-**Target:** 2–3 weeks.
+## Phase 3: Records: text, contenthash, multichain — **Next**
+
+**Target:** 1-2 weeks.
 **Gating:** none.
 
-- Enable `ITextResolver` (EIP-634: avatar, email, url, com.twitter, …).
-- Enable `IContentHashResolver` (EIP-1577).
-- Enable `IAddressResolver` multichain (EIP-2304 / ENSIP-9) — publish QRL Zond coinType guidance.
-- SDK: `getText` / `setText`, `getContenthash` / `setContenthash`.
+The resolver already implements `ITextResolver` and `IContentHashResolver` — they're tested but not exercised end-to-end on testnet. Remaining work:
 
-**Output:** feature parity with ENS for record retrieval. Sufficient for dApp avatar display + IPFS content routing.
+- [ ] `IAddressResolver` multichain `addr(bytes32, uint256)` implementation on `QRLPublicResolver`.
+- [ ] SDK: `getText` / `setText`, `getContenthash` / `setContenthash`, `getMultichainAddr(name, coinType)`.
+- [ ] Integration tests on testnet: text, contenthash, multichain records.
+- [ ] (Optional) UniversalResolver deployment for batch reads.
+- [ ] SLIP-44 / ENSIP-11 coinType guidance for QRL Zond (`0x80000539` testnet; mainnet TBD).
 
-## Phase 4 — ML-DSA signed records + post-quantum identity
+**Output**: feature parity with ENS for record retrieval. Sufficient for dApp avatar display + IPFS content routing.
 
-**Target:** 6–8 weeks.
-**Gating:** ML-DSA precompile availability (OPEN-QUESTIONS #2). If unavailable, scope shrinks to in-EVM verifier or CCIP-Read only.
+## Phase 4: ML-DSA signed records + post-quantum identity — **Unblocked**
 
-- `QRLSignatureVerifier` contract (precompile wrapper or in-EVM fallback).
-- ENSIP-19 `setNameForAddrWithSignature` ported to ML-DSA-87.
-- CCIP-Read gateway: off-chain signed resolver records (EIP-3668 + EIP-5559).
-- **`IPubkeyResolver` profile — QNS extension beyond ENS.** Publish ML-DSA-87 pubkeys (2,592 bytes) as first-class resolver records, indexed by name. Enables dApp-signed actions, verifiable credentials, gossip-network identity.
+**Target:** 4-6 weeks.
+**Gating:** precompile docs drop (expected 2026-04-28 from Cyyber).
 
-**Output:** post-quantum identity primitive. This is the phase that makes QNS more than "ENS on Zond".
+Cyyber confirmed 2026-04-21 that Zond has ML-DSA-87 verification precompile(s). Docs with address / ABI / gas are in progress. Once they land:
 
-## Phase 5 — Mainnet + economics
+- [ ] `QRLSignatureVerifier.sol` wrapping the precompile.
+- [ ] `SignatureReverseRegistrar.sol` — ENSIP-19 `setNameForAddrWithSignature` ported to ML-DSA-87.
+- [ ] CCIP-Read gateway (EIP-3668 + EIP-5559): off-chain signed records.
+- [ ] `IPubkeyResolver` profile — **QNS extension beyond ENS.** Publish ML-DSA-87 pubkeys (2,592 bytes) as first-class resolver records indexed by name. Enables dApp-signed actions, verifiable credentials, gossip-network identity.
+- [ ] SDK helpers for signing via `@theqrl/mldsa87` with context `"ZOND/QNS/v1"`.
 
-**Target:** tied to QRL Zond mainnet launch.
-**Gating:** mainnet chainId, QRC-721 standard status, QIP acceptance.
+**Output**: post-quantum identity primitive. This is the phase that makes QNS meaningfully more than "ENS on Zond".
 
-- Replace `FIFSQRLRegistrar` with commit/reveal registrar (pricing, grace period, renewals).
-- Pricing in QRL (Planck/Shor sub-units).
-- QIP formalizing QNS as ecosystem standard.
-- Optional: tokenize names as QRC-721 once that standard stabilizes.
+## Phase 5: Mainnet + economics
 
-**Output:** production QNS on QRL Zond mainnet.
+**Target**: tied to QRL Zond mainnet launch.
+**Gating**: mainnet chainId commitment, QRC-721 standard status, QIP ratification.
+
+- [ ] Replace `FIFSQRLRegistrar` with commit/reveal registrar (pricing, grace period, renewals).
+- [ ] Pricing denominated in QRL (sub-units Planck/Shor per the roadmap rebrand).
+- [ ] QIP formalizing QNS as ecosystem standard (custodians: jackalyst / fr1t2 / jplomas).
+- [ ] Optional: tokenize names as QRC-721 once that standard stabilizes.
+
+**Output**: production QNS on QRL Zond mainnet.
 
 ## Non-goals (not in roadmap)
 
-- **ENSv2 per-name sub-registry architecture** — spec unfinalized, moving target. Stay on v1 monolithic registry.
-- **NameWrapper / fuses** — adds attack surface orthogonal to post-quantum naming.
-- **DNSSEC oracle integration** — out of scope.
-- **Namechain L2** — cancelled by ENS Labs Feb 2026.
+- **ENSv2 per-name sub-registry architecture**: spec unfinalized, moving target. Stay on v1 monolithic registry.
+- **NameWrapper / fuses**: adds attack surface orthogonal to post-quantum naming.
+- **DNSSEC oracle integration**: out of scope.
+- **Namechain L2**: cancelled by ENS Labs Feb 2026.
 
 ## Cross-workspace touchpoints
 
-- **`myqrlwallet-frontend`** — consume `@qns/sdk` for address-book name resolution once Phase 1 ships.
-- **`myqrlwallet-connect`** — dApp-connect SDK can advertise QNS capability in session metadata.
-- **`zondscan`** — display QNS names in tx/address views once reverse resolution (Phase 2) is live.
-- **`QuantaPool`** — potential consumer for validator identity (publish validator ML-DSA pubkey as a QNS record) in Phase 4+.
+- **`myqrlwallet-frontend`**: consume `@qns/sdk` for address-book name resolution. Wire in Phase 3 once records flow end-to-end.
+- **`myqrlwallet-connect`**: already the primary SDK provider via `QRLConnectProvider` (EIP-1193). Could advertise QNS capability in dApp session metadata.
+- **`zondscan`**: display QNS names in tx/address views. Blocked on zondscan indexing `NameChanged` events (Phase 2 ready).
+- **`QuantaPool`**: consumer for validator identity — publish ML-DSA validator pubkey as a QNS pubkey record once Phase 4 ships.
