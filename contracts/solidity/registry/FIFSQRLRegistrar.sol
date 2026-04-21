@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma solidity ^0.8.24;
+
+import {ENS} from "@ensdomains/registry/ENS.sol";
+
+/// @title FIFSQRLRegistrar
+/// @notice First-in-first-served registrar for a single TLD node under a QNS
+///         registry. Deployer owns the TLD; anyone can register any unclaimed
+///         subnode by calling `register(label, owner)`.
+///
+/// Permissioning model:
+///   - The ENS registry must have this contract set as owner of `baseNode`.
+///     Typical setup: `Root.setSubnodeOwner(labelhash("qrl"), fifsAddr)`.
+///   - Once the TLD is owned by this registrar, `register(label, owner)`
+///     writes `subnode = keccak(baseNode || label)` with `owner` in the
+///     registry. The existing subnode owner (if any) must either be `0x0` or
+///     be the caller (so the existing owner can reassign / transfer).
+///
+/// This is the alpha registrar: no pricing, no commit/reveal, no grace period.
+/// Suitable for Testnet V2. Phase 5 replaces with a commit/reveal + pricing
+/// controller modeled on ETHRegistrarController.
+contract FIFSQRLRegistrar {
+    ENS public immutable ens;
+    bytes32 public immutable baseNode;
+
+    error NotAvailable(bytes32 label, address currentOwner);
+
+    event Registered(bytes32 indexed label, address indexed owner);
+
+    constructor(ENS _ens, bytes32 _baseNode) {
+        ens = _ens;
+        baseNode = _baseNode;
+    }
+
+    /// @notice Registers a subnode (label) under `baseNode` to `owner`.
+    ///         Succeeds if the subnode is unassigned (owner == 0x0) or if the
+    ///         existing owner is the caller (self-transfer).
+    /// @param label The keccak256 of the label string (e.g., `labelhash("alice")`).
+    /// @param owner The new owner address for the subnode.
+    function register(bytes32 label, address owner) external {
+        bytes32 subnode = keccak256(abi.encodePacked(baseNode, label));
+        address currentOwner = ens.owner(subnode);
+        if (currentOwner != address(0) && currentOwner != msg.sender) {
+            revert NotAvailable(label, currentOwner);
+        }
+        ens.setSubnodeOwner(baseNode, label, owner);
+        emit Registered(label, owner);
+    }
+
+    /// @notice Returns true if the subnode is unclaimed (owner == 0x0).
+    function available(bytes32 label) external view returns (bool) {
+        bytes32 subnode = keccak256(abi.encodePacked(baseNode, label));
+        return ens.owner(subnode) == address(0);
+    }
+}
