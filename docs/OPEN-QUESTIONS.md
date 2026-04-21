@@ -5,7 +5,7 @@ Seven load-bearing unknowns for Phase 1 deployment. Status column updated 2026-0
 | # | Question | Status |
 |---|---|---|
 | 1 | Hyperion `address` type width | **ANSWERED** (20 bytes, verified in source) |
-| 2 | ML-DSA-87 verification precompile | Waiting for dev input |
+| 2 | ML-DSA-87 verification precompile | **ANSWERED** (exist on Zond per Cyyber; docs by 2026-04-28) |
 | 3 | Testnet V2 chainId | **ANSWERED** (1337 = `0x539`, verified via RPC) |
 | 4 | `msg.sender` bytes: include descriptor? | Unknown (follow-up on Q1 finding) |
 | 5 | TLD choice | **ANSWERED** (`.qrl` per user 2026-04-21, still needs QIP to formalize) |
@@ -35,15 +35,22 @@ unsigned storageBytes() const override { return 160 / 8; }
 
 The Q4 descriptor question becomes: "how does the 20-byte EVM `msg.sender` relate to the 24-byte wallet-display form?" (i.e., is the 24-byte form `[descriptor][20-byte-evm-address][?]` or something else?). That's now the remaining address-layer open question.
 
-## 2. ML-DSA-87 verification precompile
+## 2. ML-DSA-87 verification precompile: ANSWERED (exists)
 
-**Q:** Is there a precompile on Zond for ML-DSA-87 signature verification? If yes: at what address, with what ABI, at what gas cost?
+**Finding (2026-04-21, QRL core dev Cyyber):**
 
-**Status:** Waiting for QRL dev input.
+> moscowchill: Is there a precompile on Zond for ML-DSA-87 signature verification?
+> Cyyber: Yes there are. The documentation is in progress and will be shared by the upcoming Tuesday [2026-04-28].
 
-**Affects:** Phase 4 (signed records, ENSIP-19 sig reverse, CCIP-Read) is tractable with a precompile and infeasible without one.
+**Implication for Phase 4:** precompile-based `QRLSignatureVerifier` path is green. We no longer need the in-EVM fallback (5-10M gas) or a CCIP-Read-only workaround. ENSIP-19 `setNameForAddrWithSignature` ported to ML-DSA-87 becomes cheap enough for routine use.
 
-**How to resolve:** Grep `/home/waterfall/myqrlwallet/go-qrl` for `PrecompiledContract` registrations and MLDSA references. Ask QRL core-devs. If missing, open a QIP proposing inclusion before mainnet freeze.
+**Still to confirm once docs land:**
+- Precompile address (likely a QRL-reserved slot near `0x01` per EIP tradition).
+- Exact ABI: `(message, signature, publicKey, [context]) -> bool`? Or an alternative shape?
+- Gas cost: expected in the 100K-500K range per verify based on comparable verification precompiles, but unknown until docs.
+- Context-string handling: whether the precompile accepts a domain-separator context parameter (for `"ZOND/QNS/v1"` replay protection) or if we need to keccak the context into the message pre-call.
+
+**How to use once docs land:** Update `docs/CRYPTO-INTEGRATION.md` Path 1 with the exact address + ABI. Implement `QRLSignatureVerifier.sol` wrapping the precompile, and `SignatureReverseRegistrar.sol` using it for signed `setName`. Add SDK helper for ML-DSA-87 signing via `@theqrl/mldsa87`.
 
 ## 3. Testnet V2 chainId: ANSWERED (1337)
 
@@ -125,4 +132,5 @@ Aligns with post-Zond rebrand, unambiguous. FIFS registrar in Phase 1 will own t
 2026-04-21  Q5 answered: TLD = .qrl (user decision, QIP pending)
 2026-04-21  Q6 answered: ecrecover removed on Zond (QRL dev: "ECDSA has NO place")
 2026-04-21  Q7 answered: SDK targets @qrlwallet/connect v2 (post-quantum ML-KEM-768 session, EIP-1193); @theqrl/qrl_providers deprecated for QNS
+2026-04-21  Q2 answered by Cyyber: ML-DSA-87 precompile exists on Zond; docs expected 2026-04-28 (address/ABI/gas TBD)
 ```
