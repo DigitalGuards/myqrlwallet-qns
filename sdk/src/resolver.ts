@@ -4,8 +4,13 @@ import { namehash, nodeToHex } from "./namehash.js";
 const utf8 = new TextEncoder();
 
 /**
- * EIP-1193-style provider. Compatible with `window.qrl` from
- * `@theqrl/qrl_providers`, `window.ethereum`, ethers/viem providers, etc.
+ * EIP-1193-style provider. Any object exposing an async `request({method, params})`
+ * works. Known-compatible providers:
+ *   - `@qrlwallet/connect` v2+ (primary: mobile QR/deep-link session to MyQRLWallet,
+ *     post-quantum ML-KEM-768 relay). Construct a `QRLConnectProvider` and pass it in.
+ *   - ethers/viem provider wrappers (if pointed at a QRL Zond RPC endpoint).
+ *   - Node-side: shim over `@theqrl/web3`'s `web3.qrl.call`, see
+ *     `scripts/register-and-resolve.js` `makeSdkProvider()`.
  */
 export interface RpcProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -27,6 +32,11 @@ function selector(sig: string): string {
 const SELECTOR_RESOLVER = selector("resolver(bytes32)");
 const SELECTOR_QRL_ADDR = selector("qrlAddr(bytes32)");
 const SELECTOR_ADDR = selector("addr(bytes32)");
+const SELECTOR_NAME = selector("name(bytes32)");
+
+/// namehash("addr.reverse") — the ENSIP-19 per-chain reverse namespace root.
+const ADDR_REVERSE_NODE =
+  "0x91d1777781884d03a6757a803996e38de2a42967fb37eeaca72729271025a9e2";
 
 function bytes32Arg(hex: string): string {
   if (!hex.startsWith("0x") || hex.length !== 66) {
@@ -77,6 +87,49 @@ function decodeAddress(returnData: string): string {
     return "0x" + "0".repeat(40);
   }
   return "0x" + returnData.slice(-40);
+}
+
+/// Decode an ABI-encoded `string` return value — same wire format as bytes.
+function decodeString(returnData: string): string {
+  const bytes = decodeBytes(returnData);
+  return new TextDecoder().decode(bytes);
+}
+
+function stripAddrPrefix(addr: string): string {
+  const lower = addr.toLowerCase();
+  if (lower.startsWith("0x")) return lower.slice(2);
+  if (lower.startsWith("q")) return lower.slice(1);
+  return lower;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
+/// ENSIP-19: keccak256 of the 40-char lowercase hex of a 20-byte address, no
+/// `0x`/`Q` prefix. The ReverseRegistrar labels subnodes by this hash.
+function sha3HexAddress(addr: string): string {
+  const hex = stripAddrPrefix(addr);
+  if (hex.length !== 40 || !/^[0-9a-f]+$/.test(hex)) {
+    throw new Error(`expected 20-byte address hex, got "${addr}"`);
+  }
+  return "0x" + bytesToHex(keccak_256(utf8.encode(hex)));
+}
+
+function reverseNodeFor(addr: string): string {
+  const labelHash = sha3HexAddress(addr).slice(2);
+  const concat = ADDR_REVERSE_NODE.slice(2) + labelHash;
+  return "0x" + bytesToHex(keccak_256(hexToBytes(concat)));
 }
 
 /**
@@ -137,12 +190,49 @@ export async function resolveLegacyAddr(
 }
 
 /**
- * Reverse lookup: given a QRL address, find its primary name.
- * Not yet implemented; lands in Phase 2 with ReverseRegistrar.
+ * Reverse lookup: given a 20-byte EVM-form address (`0x...` or `Q...`),
+ * return the primary name set on its `addr.reverse` record, or null.
+ *
+ * Following ENS convention, this does NOT forward-confirm (the caller
+ * should re-resolve and check equality if trust is required). Forward-
+ * confirm helper lives at `verifyReverse`.
  */
 export async function lookupAddress(
-  _qrlAddress: Uint8Array,
-  _config: QnsConfig,
+  addr: string,
+  config: QnsConfig,
 ): Promise<string | null> {
-  throw new Error("lookupAddress: not implemented until Phase 2");
+  const node = reverseNodeFor(addr);
+
+  const resolverData = SELECTOR_RESOLVER + bytes32Arg(node);
+  const resolverResult = await ethCall(
+    config.provider,
+    config.registry,
+    resolverData,
+  );
+  const resolver = decodeAddress(resolverResult);
+  if (isZeroAddr(resolver)) return null;
+
+  const nameData = SELECTOR_NAME + bytes32Arg(node);
+  const nameResult = await ethCall(config.provider, resolver, nameData);
+  const name = decodeString(nameResult);
+  return name.length === 0 ? null : name;
+}
+
+/**
+ * Convenience wrapper that calls `lookupAddress` and then re-resolves the
+ * returned name to confirm it maps back to the given address (via the
+ * 20-byte legacy `addr(bytes32)` record). Returns the name only on match.
+ * Returns null when no reverse is set, or the name doesn't forward-resolve
+ * to the expected address.
+ */
+export async function verifyReverse(
+  addr: string,
+  config: QnsConfig,
+): Promise<string | null> {
+  const name = await lookupAddress(addr, config);
+  if (!name) return null;
+  const forwardAddr = await resolveLegacyAddr(name, config);
+  if (!forwardAddr) return null;
+  const canonical = "0x" + stripAddrPrefix(addr);
+  return forwardAddr.toLowerCase() === canonical ? name : null;
 }

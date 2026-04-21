@@ -8,16 +8,25 @@
   "coinType": "0x80000539",
   "coinTypeDerivation": "0x80000000 | chainId (ENSIP-11)",
   "contracts": {
-    "ENSRegistry": "Q1eFC7c36574c57A5B18fe7d83B605A0AC3c74f29",
-    "Root": "Q855ab5437D7d9380735b073e9a5d451dd10e4e58",
-    "FIFSQRLRegistrar": "Q917b8A975008559cA7FeF092992d16E89E94B165",
-    "QRLPublicResolver": "Q6BFc15A9fC7c1927dd4F3126dA179fD8f5b44471"
+    "ENSRegistry": "Qd812032246Fc1e53f5eC392c325b1B4A8C0C2f92",
+    "Root": "Qd973B4504D432916650EB26A83bCB1E0cbE6Bb4B",
+    "FIFSQRLRegistrar": "Qcc731b748292BA5af2F49F342783986fAe6C68F6",
+    "ReverseRegistrar": "QF1f50E5b74671Ef90Bc515d3beb46d2Ea55e7a70",
+    "QRLPublicResolver": "Q77008762334bE497f61722d74115B91A70bBfD91"
   },
   "notes": [
     "Contracts are null until Phase 1 deploys — see docs/ROADMAP.md.",
     "chainId 1337 is the current Testnet V2 value per ../QuantaPool/CLAUDE.md — confirm with qrl_chainId before deploy (OPEN-QUESTIONS.md #3).",
     "coinType 0x80000539 is derived from chainId 1337; re-derive if chainId changes."
   ],
-  "deployedAt": "2026-04-21T11:48:36.993Z",
-  "deployer": "Q2E13b52fd3cda0a57f9037856B7Df971074e2489"
+  "deployedAt": "2026-04-21T13:14:37.905Z",
+  "deployer": "Q2E13b52fd3cda0a57f9037856B7Df971074e2489",
+  "previousContracts": {
+    "ENSRegistry": "Q892A77732B7E4eeBE6CB1861751adb4356640572",
+    "Root": "QfF3AD8131A06af8A31037fe944f8d836459ebb3D",
+    "FIFSQRLRegistrar": "Q9676B5d2F3036D2d130dCFEA50C50A3bc0bf49f4",
+    "ReverseRegistrar": "Q069041013d08F3990f805575B30f63b7460995F5",
+    "QRLPublicResolver": "Q61bDB56c55515768601Fc176FC3f71BCd2cdA2F8"
+  },
+  "buildTarget": "hyperion"
 }

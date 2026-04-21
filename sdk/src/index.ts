@@ -3,6 +3,7 @@ export {
   resolveName,
   resolveLegacyAddr,
   lookupAddress,
+  verifyReverse,
   getResolver,
 } from "./resolver.js";
 export type { RpcProvider, QnsConfig } from "./resolver.js";

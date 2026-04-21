@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-pragma solidity ^0.8.24;
+// Generated from contracts/solidity/resolvers/QRLPublicResolver.sol by scripts/sync-hyperion.js.
+// Edit the Solidity source, then re-run this script.
+pragma hyperion >=0.0;
 
-import {ENS} from "@ensdomains/registry/ENS.sol";
-import {ResolverBase} from "@ensdomains/resolvers/ResolverBase.sol";
-import {IAddrResolver} from "@ensdomains/resolvers/profiles/IAddrResolver.sol";
-import {ITextResolver} from "@ensdomains/resolvers/profiles/ITextResolver.sol";
-import {IContentHashResolver} from "@ensdomains/resolvers/profiles/IContentHashResolver.sol";
-import {INameResolver} from "@ensdomains/resolvers/profiles/INameResolver.sol";
-import {IQRLAddrResolver} from "./profiles/IQRLAddrResolver.sol";
+import {ENS} from "../vendored/registry/ENS.hyp";
+import {ResolverBase} from "../vendored/resolvers/ResolverBase.hyp";
+import {IAddrResolver} from "../vendored/resolvers/profiles/IAddrResolver.hyp";
+import {ITextResolver} from "../vendored/resolvers/profiles/ITextResolver.hyp";
+import {IContentHashResolver} from "../vendored/resolvers/profiles/IContentHashResolver.hyp";
+import {INameResolver} from "../vendored/resolvers/profiles/INameResolver.hyp";
+import {IQRLAddrResolver} from "./profiles/IQRLAddrResolver.hyp";
 
 /// @title QRLPublicResolver
 /// @notice Minimal public resolver for QNS Phase 1.2. Supports legacy

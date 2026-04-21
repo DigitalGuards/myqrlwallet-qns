@@ -93,13 +93,17 @@ Aligns with post-Zond rebrand, unambiguous. FIFS registrar in Phase 1 will own t
 
 **Phase 4 consequence:** Without `ecrecover`, *and* without an ML-DSA precompile, ENSIP-19 signature-based reverse cannot be implemented on-chain cheaply. Fallback: CCIP-Read-style off-chain signed gateway, or defer signature-based reverse indefinitely and rely on `msg.sender`-based `setName()`.
 
-## 7. SDK target: ANSWERED (direct `@theqrl/qrl_providers`)
+## 7. SDK target: ANSWERED (`@qrlwallet/connect` v2+, EIP-1193)
 
-**Finding (2026-04-21, user):** User is building their own SDK in `myqrlwallet-connect`. `zondjs` is not the target.
+**Finding (2026-04-21 updated):** `@qrlwallet/connect` v2.0.0 is the primary browser/mobile provider. `@theqrl/qrl_providers` is considered outdated for QNS's use case; `zondjs` is not the target either.
 
-**Implication:** `@qns/sdk` targets `@theqrl/qrl_providers` EIP-1193 `window.qrl` interface directly, as currently scaffolded. No change to the SDK plan.
+`@qrlwallet/connect` (`/home/waterfall/myqrlwallet/myqrlwallet-connect`, `DigitalGuards/myqrlwallet-connect`) exports `QRLConnectProvider` which:
+- Implements EIP-1193 `request({method, params})` directly
+- Opens a post-quantum (ML-KEM-768) encrypted Socket.IO session via `qrlwallet.com/relay`
+- Forwards all `qrl_*` and `eth_*` RPC calls to MyQRLWallet mobile app
+- No `window.qrl` extension dependency
 
-**Potential integration:** `myqrlwallet-connect` and `@qns/sdk` may cross-integrate in Phase 2/3. Keep `@qns/sdk` dependency-minimal so either SDK can consume it.
+**Implication:** `@qns/sdk` stays EIP-1193-agnostic (`RpcProvider.request(...)`). `@qrlwallet/connect` is listed as the recommended primary provider in `sdk/README.md`, but kept as an *optional* peer-dep — server-side callers (gqrl RPC proxy, CCIP-Read gateway) may use neither.
 
 ---
 
@@ -120,5 +124,5 @@ Aligns with post-Zond rebrand, unambiguous. FIFS registrar in Phase 1 will own t
 2026-04-21  Q3 answered: chainId 1337 (qrl_chainId RPC call returned 0x539)
 2026-04-21  Q5 answered: TLD = .qrl (user decision, QIP pending)
 2026-04-21  Q6 answered: ecrecover removed on Zond (QRL dev: "ECDSA has NO place")
-2026-04-21  Q7 answered: SDK targets @theqrl/qrl_providers directly (user building own SDK in myqrlwallet-connect)
+2026-04-21  Q7 answered: SDK targets @qrlwallet/connect v2 (post-quantum ML-KEM-768 session, EIP-1193); @theqrl/qrl_providers deprecated for QNS
 ```
