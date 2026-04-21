@@ -1,58 +1,54 @@
 # Vendored ENS Contracts
 
-This directory holds a **pinned copy** of [`ensdomains/ens-contracts`](https://github.com/ensdomains/ens-contracts), minimally modified for QRL Zond. It is intentionally empty at alpha — Phase 1 copies the relevant subset in.
-
-## What gets vendored (Phase 1)
-
-From the pinned upstream commit:
-
-| Upstream path | Vendored location | Purpose |
-|---|---|---|
-| `contracts/registry/ENS.sol` | `registry/ENS.sol` | Registry interface |
-| `contracts/registry/ENSRegistry.sol` | `registry/ENSRegistry.sol` | Core registry |
-| `contracts/root/Root.sol` | `registry/Root.sol` | TLD-ownership root |
-| `contracts/resolvers/PublicResolver.sol` | `resolvers/PublicResolver.sol` | Default resolver |
-| `contracts/resolvers/profiles/*` | `resolvers/profiles/` | Resolver record interfaces (text, addr, contenthash, etc.) |
-| `contracts/reverseRegistrar/ReverseRegistrar.sol` | `reverseRegistrar/ReverseRegistrar.sol` | Reverse namespace controller |
-| `contracts/reverseRegistrar/ReverseClaimer.sol` | `reverseRegistrar/ReverseClaimer.sol` | Helper mixin |
-| `contracts/utils/UniversalResolver.sol` | `utils/UniversalResolver.sol` | Single-RPC resolver |
-
-**Excluded from initial vendoring:**
-
-- `contracts/wrapper/*` — NameWrapper, fuses, permissions. Defer indefinitely.
-- `contracts/ethregistrar/*` — Auction + BaseRegistrarImplementation. Replaced by custom `FIFSQRLRegistrar` for MVP, commit/reveal for mainnet (Phase 5).
-- `contracts/dnssec-oracle/*` — DNSSEC tooling. Out of scope.
+Pinned copy of [`ensdomains/ens-contracts`](https://github.com/ensdomains/ens-contracts), minimally modified for QRL Zond. Actual diffs vs upstream are tracked in `DIFFS.md`.
 
 ## Pin
 
-**Target commit**: TBD — select a Q4 2025 commit that is post-ENSIP-19 and pre-ENSv2 per-name-registry work.
-
-When pinning, record here:
-
 ```
-commit: <SHA>
-tag:    <e.g. v1.x.y if tagged>
-date:   <author date>
-reason: last stable pre-ENSv2 commit; includes ENSIP-19 per-chain reverse
+repo:   ensdomains/ens-contracts
+tag:    v1.6.2
+commit: 3d477d4
+date:   2025-12-08
+reason: last stable tagged release pre-ENSv2; includes ENSIP-19 per-chain reverse and modern resolver profiles. Q4 2025 target per docs/PORT-PLAN.md.
 ```
+
+## Currently vendored (Phase 1.1: registry layer only)
+
+| Upstream path | Vendored location | Diff |
+|---|---|---|
+| `contracts/registry/ENS.sol` | `registry/ENS.sol` | none |
+| `contracts/registry/ENSRegistry.sol` | `registry/ENSRegistry.sol` | 1 line (constructor visibility) |
+| `contracts/root/Root.sol` | `root/Root.sol` | 3 lines (OZ v5 migration) |
+| `contracts/root/Controllable.sol` | `root/Controllable.sol` | 1 line (OZ v5 migration) |
+
+Not vendored yet (Phase 1.2+):
+- `contracts/resolvers/*` (PublicResolver + profiles) — brings Path A dual-stack resolver diffs.
+- `contracts/reverseRegistrar/*` — Phase 2.
+- `contracts/universalResolver/*` — Phase 2.
+
+**Permanently excluded:**
+- `contracts/wrapper/*` (NameWrapper) — fuses/permissions outside post-quantum scope.
+- `contracts/ethregistrar/*` (auction stack) — replaced by custom `FIFSQRLRegistrar` for MVP.
+- `contracts/dnssec-oracle/*` (DNSSEC) — out of scope.
+- `contracts/dnsregistrar/*` — out of scope.
+- `contracts/ccipRead/*` — revisit in Phase 4 if needed.
+- Upstream `contracts/root/Ownable.sol` — not used by files in this scope.
+
+## Dependencies
+
+Pulled via `forge install`, tracked in `lib/`:
+
+| Package | Pin | Purpose |
+|---|---|---|
+| `OpenZeppelin/openzeppelin-contracts` | `v5.1.0` (SHA `69c8def5`) | `Ownable`, `Context` (for Controllable/Root) |
+| `foundry-rs/forge-std` | `v1.15.0` (SHA `0844d7e`) | Test-suite scaffolding (Phase 1.2+) |
 
 ## Modification policy
 
-Touch vendored files **minimally**. Every deviation from upstream must be recorded in `DIFFS.md` (created in Phase 1) with:
-
-1. File path and upstream line range.
-2. What changed and why (e.g., "replaced `address` with `bytes` for QRL 24-byte compat per Path A").
-3. Whether it is re-mergeable on a future pin bump.
-
-Prefer implementing QRL-specific behavior in **new files outside this directory** (e.g., `contracts/solidity/resolvers/profiles/IQRLAddrResolver.sol`) and composing rather than editing vendored Solidity.
+- **Touch vendored files minimally.** Every diff vs upstream is documented in `DIFFS.md`.
+- **Prefer composition over editing.** QRL-specific behavior (e.g., `IQRLAddrResolver` profile) lives in new files **outside** this directory and inherits/composes vendored code.
+- **Preserve headers and inline comments** from upstream where possible.
 
 ## License
 
-ENS contracts are [MIT-licensed](https://github.com/ensdomains/ens-contracts/blob/master/LICENSE). When vendoring, preserve the upstream `LICENSE` file alongside copied sources. QNS itself is GPL-3.0; MIT code composed into a GPL-3.0 project is compatible.
-
-## References
-
-- Upstream: https://github.com/ensdomains/ens-contracts
-- ENS docs: https://docs.ens.domains
-- ENSIP index: https://docs.ens.domains/ensip
-- Port plan: [`../../docs/PORT-PLAN.md`](../../docs/PORT-PLAN.md) (actually `../../../docs/PORT-PLAN.md` from here)
+ENS contracts are MIT (see `LICENSE` in this directory, copied verbatim from `ensdomains/ens-contracts@v1.6.2`). MIT code composed into a GPL-3.0 project (QNS) is compatible.

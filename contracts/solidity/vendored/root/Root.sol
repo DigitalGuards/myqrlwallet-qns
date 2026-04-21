@@ -1,0 +1,49 @@
+pragma solidity ^0.8.4;
+
+import "../registry/ENS.sol";
+import "./Controllable.sol";
+
+// QNS DIFF vs ensdomains/ens-contracts@v1.6.2:
+// 1. Removed `public` from constructor (deprecated since Solidity 0.7).
+// 2. OZ v5 Ownable requires an initialOwner; Controllable (our parent)
+//    forwards msg.sender, so Root no longer calls Ownable directly.
+//    Upstream was written against OZ v4 which had a no-arg Ownable.
+// See vendored/DIFFS.md.
+contract Root is Controllable {
+    bytes32 private constant ROOT_NODE = bytes32(0);
+
+    bytes4 private constant INTERFACE_META_ID =
+        bytes4(keccak256("supportsInterface(bytes4)"));
+
+    event TLDLocked(bytes32 indexed label);
+
+    ENS public ens;
+    mapping(bytes32 => bool) public locked;
+
+    constructor(ENS _ens) {
+        ens = _ens;
+    }
+
+    function setSubnodeOwner(
+        bytes32 label,
+        address owner
+    ) external onlyController {
+        require(!locked[label]);
+        ens.setSubnodeOwner(ROOT_NODE, label, owner);
+    }
+
+    function setResolver(address resolver) external onlyOwner {
+        ens.setResolver(ROOT_NODE, resolver);
+    }
+
+    function lock(bytes32 label) external onlyOwner {
+        emit TLDLocked(label);
+        locked[label] = true;
+    }
+
+    function supportsInterface(
+        bytes4 interfaceID
+    ) external pure returns (bool) {
+        return interfaceID == INTERFACE_META_ID;
+    }
+}
