@@ -1,0 +1,25 @@
+{
+  "name": "myqrlwallet-qns",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "description": "QRL Name Service — post-quantum port of ENS to QRL Zond",
+  "scripts": {
+    "compile": "forge build",
+    "test": "forge test",
+    "sync:hyperion": "echo 'TODO: port scripts/sync-hyperion.js from QuantaPool once QNS has Solidity sources' && exit 1",
+    "compile:hyperion": "echo 'TODO: port scripts/compile-hyperion.js from QuantaPool' && exit 1",
+    "deploy:testnet": "echo 'TODO: deployment scripts land with Phase 1 contracts' && exit 1",
+    "sdk:build": "npm --prefix sdk run build",
+    "sdk:test": "npm --prefix sdk test"
+  },
+  "keywords": [
+    "qrl",
+    "qns",
+    "ens",
+    "post-quantum",
+    "naming",
+    "ml-dsa-87"
+  ],
+  "author": "DigitalGuards",
+  "license": "GPL-3.0"
+}
