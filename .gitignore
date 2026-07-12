@@ -25,3 +25,6 @@ sdk/node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local operating notes; never tracked (private infrastructure detail)
+CLAUDE.md

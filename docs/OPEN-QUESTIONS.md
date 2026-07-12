@@ -18,7 +18,7 @@ Seven load-bearing unknowns for Phase 1 deployment. Status column updated 2026-0
 
 **Finding (2026-04-21):** Hyperion preserves the 20-byte Solidity `address` type.
 
-Verified in `/home/REDACTED/myqrlwallet/hyperion/libhyperion/ast/Types.h:455-456`:
+Verified in `libhyperion/ast/Types.h:455-456` in the hyperion compiler source:
 
 ```cpp
 unsigned calldataEncodedSize(bool _padded = true) const override { return _padded ? 32 : 160 / 8; }
@@ -78,7 +78,7 @@ curl -s -X POST -H "Content-Type: application/json" \
 
 **Affects:** Whether `qrlAddr(bytes32) returns (bytes)` stores the 24-byte form or derives it from the 20-byte EVM address, and how the reverse-namespace `sha3QRLAddress` works.
 
-**How to resolve:** Inspect `/home/REDACTED/myqrlwallet/go-qrl/common/address.go` or equivalent for the address-format definition. Deploy a trivial `contract T { function me() view returns (address) { return msg.sender; } }` and compare its return to the wallet's displayed address for the same signer.
+**How to resolve:** Inspect `common/address.go` in the go-qrl source or equivalent for the address-format definition. Deploy a trivial `contract T { function me() view returns (address) { return msg.sender; } }` and compare its return to the wallet's displayed address for the same signer.
 
 ## 5. TLD choice: ANSWERED (.qrl)
 
@@ -104,7 +104,7 @@ Aligns with post-Zond rebrand, unambiguous. FIFS registrar in Phase 1 will own t
 
 **Finding (2026-04-21 updated):** `@qrlwallet/connect` v2.0.0 is the primary browser/mobile provider. `@theqrl/qrl_providers` is considered outdated for QNS's use case; `zondjs` is not the target either.
 
-`@qrlwallet/connect` (`/home/REDACTED/myqrlwallet/myqrlwallet-connect`, `DigitalGuards/myqrlwallet-connect`) exports `QRLConnectProvider` which:
+`@qrlwallet/connect` (`DigitalGuards/myqrlwallet-connect`) exports `QRLConnectProvider` which:
 - Implements EIP-1193 `request({method, params})` directly
 - Opens a post-quantum (ML-KEM-768) encrypted Socket.IO session via `qrlwallet.com/relay`
 - Forwards all `qrl_*` and `eth_*` RPC calls to MyQRLWallet mobile app

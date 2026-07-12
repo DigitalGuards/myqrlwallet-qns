@@ -55,7 +55,7 @@ Adding a new deployable: append to this list, re-run compile.
 ## Build environment
 
 - `hypc` binary at `/usr/local/bin/hypc`. Set `HYPERION_COMPILER=/path/to/hypc` if installed elsewhere.
-- Rebuild from `/home/REDACTED/myqrlwallet/hyperion` if missing. See `../../../QuantaPool/CLAUDE.md` for build flags (Z3/CVC4 off).
+- Rebuild from a local checkout of the hyperion compiler if missing (build flags: Z3/CVC4 off).
 - `build/hyperion/` output is gitignored; `.hyp` sources are committed.
 
 ## Known warnings (safe to ignore)

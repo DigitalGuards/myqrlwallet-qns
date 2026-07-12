@@ -12,7 +12,7 @@ ENS assumes a 20-byte Solidity `address`. QRL Zond wallet-displayed addresses ar
 
 ## Q1 finding (resolved): Hyperion preserves 20-byte `address`
 
-Verified 2026-04-21 in `/home/REDACTED/myqrlwallet/hyperion/libhyperion/ast/Types.h:455-456`:
+Verified 2026-04-21 in `libhyperion/ast/Types.h:455-456` in the hyperion compiler source:
 
 ```cpp
 unsigned calldataEncodedSize(bool _padded = true) const override { return _padded ? 32 : 160 / 8; }
