@@ -91,6 +91,71 @@ contract ReverseResolutionTest is Test {
         reverseRegistrar.setNameForAddr(alice, bob, address(resolver), "evil.qrl");
     }
 
+    function test_trustedReverseRegistrarCannotSetForwardAddress() public {
+        bytes32 node = _registerAlice();
+
+        vm.expectRevert();
+        vm.prank(address(reverseRegistrar));
+        resolver.setAddr(node, alice);
+    }
+
+    function test_trustedReverseRegistrarCannotSetForwardQrlAddress() public {
+        bytes32 node = _registerAlice();
+        bytes memory qrlAddress = hex"000102030405060708090a0b0c0d0e0f1011121314151617";
+
+        vm.expectRevert();
+        vm.prank(address(reverseRegistrar));
+        resolver.setQrlAddr(node, qrlAddress);
+    }
+
+    function test_trustedReverseRegistrarCannotSetForwardText() public {
+        bytes32 node = _registerAlice();
+
+        vm.expectRevert();
+        vm.prank(address(reverseRegistrar));
+        resolver.setText(node, "url", "https://evil.example");
+    }
+
+    function test_trustedReverseRegistrarCannotSetForwardContenthash() public {
+        bytes32 node = _registerAlice();
+
+        vm.expectRevert();
+        vm.prank(address(reverseRegistrar));
+        resolver.setContenthash(node, hex"e30101701220");
+    }
+
+    function test_trustedReverseRegistrarCannotClearForwardRecords() public {
+        bytes32 node = _registerAlice();
+
+        vm.expectRevert();
+        vm.prank(address(reverseRegistrar));
+        resolver.clearRecords(node);
+    }
+
+    function test_nodeOwnerCanSetNameDirectly() public {
+        bytes32 node = _registerAlice();
+
+        vm.prank(alice);
+        resolver.setName(node, "alice.qrl");
+
+        assertEq(resolver.name(node), "alice.qrl");
+    }
+
+    function test_nonOwnerCannotSetNameDirectly() public {
+        bytes32 node = _registerAlice();
+        address bob = makeAddr("bob");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                QRLPublicResolver.NotAuthorised.selector,
+                node,
+                bob
+            )
+        );
+        vm.prank(bob);
+        resolver.setName(node, "evil.qrl");
+    }
+
     function test_clearNameByOverwrite() public {
         vm.prank(alice);
         reverseRegistrar.setName("alice.qrl");
@@ -121,5 +186,12 @@ contract ReverseResolutionTest is Test {
             x >>= 4;
         }
         return keccak256(buf);
+    }
+
+    function _registerAlice() internal returns (bytes32 node) {
+        bytes32 label = keccak256(bytes("alice"));
+        node = keccak256(abi.encodePacked(QRL_NODE, label));
+        vm.prank(alice);
+        fifs.register(label, alice);
     }
 }
