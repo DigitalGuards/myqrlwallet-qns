@@ -6,7 +6,7 @@ const utf8 = new TextEncoder();
 /**
  * EIP-1193-style provider. Any object exposing an async `request({method, params})`
  * works. Known-compatible providers:
- *   - `@qrlwallet/connect` v2+ (primary: mobile QR/deep-link session to MyQRLWallet,
+ *   - `@qrlwallet/connect` v2-v4 (primary: mobile QR/deep-link session to MyQRLWallet,
  *     post-quantum ML-KEM-768 relay). Construct a `QRLConnectProvider` and pass it in.
  *   - ethers/viem provider wrappers (if pointed at a QRL Zond RPC endpoint).
  *   - Node-side: shim over `@theqrl/web3`'s `web3.qrl.call`, see
@@ -34,7 +34,7 @@ const SELECTOR_QRL_ADDR = selector("qrlAddr(bytes32)");
 const SELECTOR_ADDR = selector("addr(bytes32)");
 const SELECTOR_NAME = selector("name(bytes32)");
 
-/// namehash("addr.reverse") — the ENSIP-19 per-chain reverse namespace root.
+/// namehash("addr.reverse"), the ENSIP-19 per-chain reverse namespace root.
 const ADDR_REVERSE_NODE =
   "0x91d1777781884d03a6757a803996e38de2a42967fb37eeaca72729271025a9e2";
 
@@ -45,17 +45,17 @@ function bytes32Arg(hex: string): string {
   return hex.slice(2);
 }
 
-async function ethCall(
+async function qrlCall(
   provider: RpcProvider,
   to: string,
   data: string,
 ): Promise<string> {
   const result = await provider.request({
-    method: "eth_call",
+    method: "qrl_call",
     params: [{ to, data }, "latest"],
   });
   if (typeof result !== "string" || !result.startsWith("0x")) {
-    throw new Error(`unexpected eth_call result: ${String(result)}`);
+    throw new Error(`unexpected qrl_call result: ${String(result)}`);
   }
   return result;
 }
@@ -89,7 +89,7 @@ function decodeAddress(returnData: string): string {
   return "0x" + returnData.slice(-40);
 }
 
-/// Decode an ABI-encoded `string` return value — same wire format as bytes.
+/// Decode an ABI-encoded `string` return value, using the same wire format as bytes.
 function decodeString(returnData: string): string {
   const bytes = decodeBytes(returnData);
   return new TextDecoder().decode(bytes);
@@ -142,7 +142,7 @@ export async function getResolver(
 ): Promise<string | null> {
   const node = nodeToHex(namehash(name));
   const data = SELECTOR_RESOLVER + bytes32Arg(node);
-  const result = await ethCall(config.provider, config.registry, data);
+  const result = await qrlCall(config.provider, config.registry, data);
   const resolver = decodeAddress(result);
   return isZeroAddr(resolver) ? null : resolver;
 }
@@ -165,7 +165,7 @@ export async function resolveName(
 
   const node = nodeToHex(namehash(name));
   const data = SELECTOR_QRL_ADDR + bytes32Arg(node);
-  const result = await ethCall(config.provider, resolver, data);
+  const result = await qrlCall(config.provider, resolver, data);
   const addrBytes = decodeBytes(result);
   return addrBytes.length === 0 ? null : addrBytes;
 }
@@ -184,7 +184,7 @@ export async function resolveLegacyAddr(
 
   const node = nodeToHex(namehash(name));
   const data = SELECTOR_ADDR + bytes32Arg(node);
-  const result = await ethCall(config.provider, resolver, data);
+  const result = await qrlCall(config.provider, resolver, data);
   const addr = decodeAddress(result);
   return isZeroAddr(addr) ? null : addr;
 }
@@ -204,7 +204,7 @@ export async function lookupAddress(
   const node = reverseNodeFor(addr);
 
   const resolverData = SELECTOR_RESOLVER + bytes32Arg(node);
-  const resolverResult = await ethCall(
+  const resolverResult = await qrlCall(
     config.provider,
     config.registry,
     resolverData,
@@ -213,7 +213,7 @@ export async function lookupAddress(
   if (isZeroAddr(resolver)) return null;
 
   const nameData = SELECTOR_NAME + bytes32Arg(node);
-  const nameResult = await ethCall(config.provider, resolver, nameData);
+  const nameResult = await qrlCall(config.provider, resolver, nameData);
   const name = decodeString(nameResult);
   return name.length === 0 ? null : name;
 }
