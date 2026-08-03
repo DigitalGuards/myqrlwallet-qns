@@ -21,11 +21,11 @@ import {IQRLAddrResolver} from "./profiles/IQRLAddrResolver.sol";
 /// records (clearRecords bumps a per-node version counter).
 ///
 /// Deliberately omitted for alpha:
-///   - `IAddressResolver` (EIP-2304 multichain addr) — Phase 3.
-///   - `INameResolver` (reverse) — Phase 2, lives on ReverseRegistrar.
-///   - `IPubkeyResolver` — Phase 4, extended with ML-DSA pubkey storage.
-///   - `IInterfaceResolver` / `IABIResolver` — optional, revisit Phase 3.
-///   - NameWrapper / DNS / ENSIP-10 — out of scope.
+///   - `IAddressResolver` (EIP-2304 multichain addr): Phase 3.
+///   - `INameResolver` (reverse): Phase 2, lives on ReverseRegistrar.
+///   - `IPubkeyResolver`: Phase 4, extended with ML-DSA pubkey storage.
+///   - `IInterfaceResolver` / `IABIResolver`: optional, revisit Phase 3.
+///   - NameWrapper / DNS / ENSIP-10: out of scope.
 contract QRLPublicResolver is
     ResolverBase,
     IAddrResolver,
@@ -136,7 +136,7 @@ contract QRLPublicResolver is
     }
 
     // -----------------------------------------------------------------
-    // INameResolver (EIP-181 reverse record — used by ReverseRegistrar)
+    // INameResolver (EIP-181 reverse record used by ReverseRegistrar)
     // -----------------------------------------------------------------
 
     function name(bytes32 node) external view override returns (string memory) {
