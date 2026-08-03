@@ -12,7 +12,7 @@ function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
 }
 
 /**
- * EIP-137 namehash. Labels must already be normalized per ENSIP-15 — call
+ * EIP-137 namehash. Labels must already be normalized per ENSIP-15. Call
  * `normalize()` on untrusted input before passing labels here. Empty string
  * returns the 32-byte zero root node.
  */
@@ -30,7 +30,7 @@ export function namehash(name: string): Uint8Array {
 
 /**
  * Hex-encode a 32-byte node as `0x`-prefixed lowercase. For passing to
- * `eth_call` resolver reads.
+ * `qrl_call` resolver reads.
  */
 export function nodeToHex(node: Uint8Array): string {
   if (node.length !== 32) throw new Error("expected 32-byte node");

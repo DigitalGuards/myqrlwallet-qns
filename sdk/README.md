@@ -12,7 +12,7 @@ npm install @qns/sdk
 
 ### Provider
 
-`@qns/sdk` is provider-agnostic: anything that speaks EIP-1193 (`request({method, params})`) works. The recommended browser/mobile provider is [`@qrlwallet/connect`](https://github.com/DigitalGuards/myqrlwallet-connect) v2+, which opens a post-quantum (ML-KEM-768) encrypted session from a dApp to the MyQRLWallet mobile app via QR code or deep link.
+`@qns/sdk` accepts providers with an EIP-1193-style `request({method, params})` API and QRL's `qrl_call` RPC method. The recommended browser/mobile provider is [`@qrlwallet/connect`](https://github.com/DigitalGuards/myqrlwallet-connect) v2 through v4. It opens a post-quantum (ML-KEM-768) encrypted session from a dApp to the MyQRLWallet mobile app via QR code or deep link.
 
 ```bash
 npm install @qrlwallet/connect
@@ -59,10 +59,10 @@ const node = namehash("alice.qrl");
 | `namehash(name) -> Uint8Array` | Working (keccak256 via `@noble/hashes`) |
 | `nodeToHex(node) -> 0x...` | Working |
 | `getResolver(name, cfg) -> string \| null` | Working (live on testnet) |
-| `resolveName(name, cfg) -> Uint8Array \| null` | Working — returns 24-byte QRL wallet-display form |
-| `resolveLegacyAddr(name, cfg) -> string \| null` | Working — returns 20-byte EVM address |
-| `lookupAddress(addr, cfg) -> string \| null` | Working — ENSIP-19 reverse via `addr.reverse` |
-| `verifyReverse(addr, cfg) -> string \| null` | Working — `lookupAddress` + forward-confirm |
+| `resolveName(name, cfg) -> Uint8Array \| null` | Working; returns 24-byte QRL wallet-display form |
+| `resolveLegacyAddr(name, cfg) -> string \| null` | Working; returns 20-byte EVM address |
+| `lookupAddress(addr, cfg) -> string \| null` | Working; ENSIP-19 reverse via `addr.reverse` |
+| `verifyReverse(addr, cfg) -> string \| null` | Working; `lookupAddress` + forward-confirm |
 
 ## Normalization
 
