@@ -15,15 +15,17 @@ import {IQRLAddrResolver} from "./profiles/IQRLAddrResolver.sol";
 ///         QRL wallet-display form), `ITextResolver`, and `IContentHashResolver`.
 ///
 /// Authorisation: only the current owner of a node in the ENS registry can
-/// write records. The underlying `ResolverBase` provides ERC165 + versioned
+/// write records. The trusted reverse registrar has the narrower ability to
+/// call `setName`, which is required after it assigns a reverse node to its
+/// final owner. The underlying `ResolverBase` provides ERC165 + versioned
 /// records (clearRecords bumps a per-node version counter).
 ///
 /// Deliberately omitted for alpha:
-///   - `IAddressResolver` (EIP-2304 multichain addr) — Phase 3.
-///   - `INameResolver` (reverse) — Phase 2, lives on ReverseRegistrar.
-///   - `IPubkeyResolver` — Phase 4, extended with ML-DSA pubkey storage.
-///   - `IInterfaceResolver` / `IABIResolver` — optional, revisit Phase 3.
-///   - NameWrapper / DNS / ENSIP-10 — out of scope.
+///   - `IAddressResolver` (EIP-2304 multichain addr): Phase 3.
+///   - `INameResolver` (reverse): Phase 2, lives on ReverseRegistrar.
+///   - `IPubkeyResolver`: Phase 4, extended with ML-DSA pubkey storage.
+///   - `IInterfaceResolver` / `IABIResolver`: optional, revisit Phase 3.
+///   - NameWrapper / DNS / ENSIP-10: out of scope.
 contract QRLPublicResolver is
     ResolverBase,
     IAddrResolver,
@@ -33,8 +35,9 @@ contract QRLPublicResolver is
     INameResolver
 {
     ENS public immutable ens;
-    /// Trusted reverse registrar, allowed to call setName() on any node even
-    /// when it is not the registry owner. Settable once at deploy time.
+    /// Trusted reverse registrar, allowed to call setName() even when it is
+    /// not the registry owner. This capability does not apply to other record
+    /// setters or clearRecords. Settable once at deploy time.
     /// Set to address(0) to disable the trust relationship entirely.
     address public immutable trustedReverseRegistrar;
 
@@ -54,13 +57,18 @@ contract QRLPublicResolver is
 
     /// @inheritdoc ResolverBase
     function isAuthorised(bytes32 node) internal view override returns (bool) {
-        if (
-            trustedReverseRegistrar != address(0) &&
-            msg.sender == trustedReverseRegistrar
-        ) {
-            return true;
-        }
         return ens.owner(node) == msg.sender;
+    }
+
+    modifier authorisedName(bytes32 node) {
+        if (
+            ens.owner(node) != msg.sender &&
+            (trustedReverseRegistrar == address(0) ||
+                msg.sender != trustedReverseRegistrar)
+        ) {
+            revert NotAuthorised(node, msg.sender);
+        }
+        _;
     }
 
     // -----------------------------------------------------------------
@@ -128,7 +136,7 @@ contract QRLPublicResolver is
     }
 
     // -----------------------------------------------------------------
-    // INameResolver (EIP-181 reverse record — used by ReverseRegistrar)
+    // INameResolver (EIP-181 reverse record used by ReverseRegistrar)
     // -----------------------------------------------------------------
 
     function name(bytes32 node) external view override returns (string memory) {
@@ -136,9 +144,12 @@ contract QRLPublicResolver is
     }
 
     /// Called by `ReverseRegistrar.setNameForAddr` after it has claimed the
-    /// reverse node and assigned ownership. The registrar is the transient
-    /// owner when this fires, so `authorised` passes.
-    function setName(bytes32 node, string calldata newName) external authorised(node) {
+    /// reverse node and assigned it to the requested owner. The registrar is
+    /// therefore admitted by the setName-only trust relationship.
+    function setName(
+        bytes32 node,
+        string calldata newName
+    ) external authorisedName(node) {
         _names[recordVersions[node]][node] = newName;
         emit NameChanged(node, newName);
     }

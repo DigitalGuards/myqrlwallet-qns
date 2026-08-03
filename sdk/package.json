@@ -1,7 +1,7 @@
 {
   "name": "@qns/sdk",
   "version": "0.1.0-alpha.0",
-  "description": "QRL Name Service client SDK — forward/reverse resolution for QRL Zond",
+  "description": "QRL Name Service client SDK for forward/reverse resolution on QRL Zond",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "vitest": "^1.5.0"
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "@qrlwallet/connect": "^2.0.0",
