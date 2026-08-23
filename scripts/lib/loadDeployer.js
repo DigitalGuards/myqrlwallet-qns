@@ -94,7 +94,7 @@ function loadDeployerFromEnvironment(web3, options) {
         if (!isLoopbackRpcUrl(rpcUrl) || Number(chainId) !== LOCAL_KURTOSIS_CHAIN_ID) {
             throw new Error(
                 "QNS_PUBLIC_DEV_ACCOUNT is restricted to the local Kurtosis network " +
-                    `(loopback RPC, chain ${LOCAL_KURTOSIS_CHAIN_ID})`
+                    `(loopback RPC URL, chain ${LOCAL_KURTOSIS_CHAIN_ID})`
             );
         }
         const seed = loadPublicDevSeed(repoRoot, publicDevAccount, env);

@@ -6,6 +6,12 @@
 # Hyperion build artifacts
 build/hyperion/
 /config/local-qip55.json
+/config/testnet.json
+
+# Legacy Foundry artifacts
+cache/
+out/
+broadcast/
 
 # Node
 node_modules/

@@ -20,6 +20,8 @@ common_args=(
     --file "${dockerfile}"
     --build-arg "QRYSM_REPOSITORY=${qrysm_repository}"
     --build-arg "QRYSM_COMMIT=${qrysm_commit}"
+    --label "org.opencontainers.image.source=${qrysm_repository}"
+    --label "org.opencontainers.image.revision=${qrysm_commit}"
 )
 
 if [[ -n "${QNS_DOCKER_CGROUP_PARENT:-}" ]]; then
@@ -41,6 +43,8 @@ docker build \
 generator_args=(
     --build-arg "QRYSM_GIT_REPO=${qrysm_repository}"
     --build-arg "QRYSM_GIT_REF=${qrysm_commit}"
+    --label "org.opencontainers.image.source=${generator_repository}"
+    --label "org.opencontainers.image.revision=${generator_commit}"
     --tag "${generator_image}"
 )
 

@@ -1,6 +1,6 @@
 # Formal security verification
 
-Status: 36 Hyperion CHC targets proved safe on 2026-08-23. The proof-coupled contracts were compiled through the legacy and via-IR paths, deployed to the local 64-byte Kurtosis network, and exercised end to end.
+Status: 36 Hyperion CHC targets proved safe on 2026-08-23. Six production contracts were compiled through the legacy and via-IR paths, deployed to the local 64-byte Kurtosis network, and exercised end to end. The two formal harness contracts were compiled for proof and remained off-chain.
 
 ## Scope
 
@@ -84,7 +84,7 @@ The CHC engine proved these source-coupled lemmas for every possible input satis
 7. Every low nibble is below 16.
 8. Division by the constant 16 is safe.
 
-The production reverse encoder allocates 128 bytes, loops while `i < 64`, and calls these same `pairOffset`, `highNibble`, and `lowNibble` helpers. This provides a compositional proof for all array indexes used by the loop. SDK parity tests and live reverse resolution provide execution evidence for the full encoded value and resulting Keccak hash.
+The production reverse encoder allocates 128 bytes, loops while `i < 64`, and calls these same `pairOffset`, `highNibble`, and `lowNibble` helpers. The CHC lemmas establish the helper preconditions and every array offset used by the loop. The `hexDigit` lowercase ASCII mapping is established by source inspection, SDK vectors, and live reverse resolution, which also provide execution evidence for the full encoded value and resulting Keccak hash.
 
 ## Evidence classes
 
@@ -112,6 +112,8 @@ The authorization proof assumes `ens.owner(node)` supplies the registry owner us
 
 The reverse proof establishes universal helper lemmas and their production source composition. Dynamic-memory loop semantics are covered by compiler runtime checks, SDK parity, and live integration evidence.
 
+The migration removed the Foundry toolchain and its 28 Solidity behavior tests: 15 forward-resolution tests and 13 reverse-resolution tests. The Hyperion compile gates, focused policy proofs, SDK tests, and live flows cover the new QRL 2.0 boundaries, but they do not replace all registry lifecycle and state-transition coverage. Re-registration, operator approvals, and subnode churn need a Hyperion-native behavioral harness before production deployment.
+
 ## Concrete validation
 
 The following checks passed on the proof-coupled source:
@@ -126,7 +128,7 @@ QNS_CONFIG=config/local-qip55.json npm run verify:pq
 
 The formal gate proved 36 CHC targets. Six contracts compiled normally and via IR. The local chain accepted all six deployments. `alice.qrl` passed forward resolution, reverse resolution, and forward confirmation. SHAKE256 known-vector, ML-DSA-87 valid, ML-DSA-87 invalid, wrapper parity, and exact digest-boundary checks all passed.
 
-The live Kurtosis enclave remains available for independent review and other 64-byte collection ports.
+The Kurtosis evidence and deployment record remain available for independent review. The local enclave was stopped after validation to release host resources and must be recreated for another live run.
 
 ## Residual protocol decisions
 
@@ -136,5 +138,7 @@ The live Kurtosis enclave remains available for independent review and other 64-
 - Define the public-key-to-QRL-identity binding before signatures authorize QNS record writes.
 - Freeze the canonical signed-record encoding and treat any change to `QNS-SIGN-v1` as a protocol-version change.
 - Select a stable Hyperion release and repeat the proof with its supported Z3 version before public deployment.
+- Select the production governance owner, revoke the deployer's temporary Root controller role, and transfer Root plus ReverseRegistrar ownership through a separately reviewed handoff procedure.
+- Restore Hyperion-native lifecycle coverage for the 28 removed Foundry behavior tests before production deployment.
 
 The detailed review artifacts are in [`docs/security-review-2026-08-23-qrl2/`](./security-review-2026-08-23-qrl2/).

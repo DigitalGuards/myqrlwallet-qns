@@ -40,4 +40,4 @@ The attacker controls all call data and all public function parameters. The atta
 - resolver owner-only records change only for the current node owner
 - trusted reverse registrar capability reaches `setName` only
 - reverse labels consume all 64 address bytes as 128 lowercase hexadecimal characters
-- local public fixtures are selected only for the exact loopback development chain
+- local public fixtures are selected only for the exact loopback-URL development chain, while host bind scope is verified independently before enclave use

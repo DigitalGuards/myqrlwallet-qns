@@ -2,7 +2,7 @@
 
 QNS is a Hyperion-native naming service for QRL 2.0. It keeps the stable ENS v1 registry model, uses native 64-byte QRL addresses, and adds post-quantum signing groundwork with SHAKE256 and ML-DSA-87.
 
-Status: active QRL 2.0 migration work. The contracts compile only with the 64-byte Hyperion toolchain. The deployment recorded in `config/testnet.json` belongs to the legacy 20-byte Testnet V2 network and is retained as historical state. Use a fresh 64-byte network for new deployments.
+Status: active QRL 2.0 migration work. The contracts compile only with the 64-byte Hyperion toolchain. A local `config/testnet.json` may retain the legacy 20-byte Testnet V2 deployment as historical state; that file is ignored because deployment records can contain private infrastructure details. Use a fresh 64-byte network for new deployments.
 
 ## Design
 
@@ -52,7 +52,9 @@ npm run kurtosis:start
 kurtosis enclave inspect qrl2-qns
 ```
 
-The local node image is built from the sibling `go-qrl/` precompile branch. Qrysm is pinned to `cyyber/qrysm@b53fd7c4`, and the genesis generator is pinned to `theQRL/qrl-genesis-generator@6a11fbce`. The start script builds any missing local image automatically.
+The local node image is built from the sibling `go-qrl/` precompile branch. Qrysm is pinned to `cyyber/qrysm@b53fd7c4`, and the genesis generator is pinned to `theQRL/qrl-genesis-generator@6a11fbce`. Image revision labels and running container image IDs are checked before reuse. Stale or missing images are rebuilt; `QNS_FORCE_REBUILD=1` forces a clean image refresh for a new enclave. The standalone builder labels dirty go-qrl inputs, and the start script refuses a dirty checkout because its commit alone cannot identify the image source.
+
+The qrl-package execution client listens on `0.0.0.0` inside its container and enables admin, Engine, debug, and txpool APIs. `port_publisher.nat_exit_ip` controls P2P advertisement only. Docker normally publishes unspecified host addresses on every interface, so `npm run kurtosis:start` probes Docker's actual bind behavior and refuses startup unless every published address is loopback. Configure Docker's default bind for user-defined bridge networks to `127.0.0.1`, or use `QNS_ALLOW_WILDCARD_BIND=1` only after applying and verifying host-level access controls. The client URL `http://127.0.0.1:32002` and the deployer loader's loopback URL guard do not attest the host bind scope. See the collection-wide [64-byte Kurtosis guide](https://github.com/DigitalGuards/myqrlwallet-collection/blob/main/docs/KURTOSIS-64BYTE-PORTS.md).
 
 Copy the reported execution RPC URL into `config/local-qip55.json`, compile, and deploy with:
 
@@ -69,9 +71,11 @@ QNS_PUBLIC_DEV_ACCOUNT=0 npm run register -- alice
 npm run verify:pq
 ```
 
-This selector is accepted only for a loopback RPC on local Kurtosis chain `3151908`. When explicitly set, it takes precedence over a `TESTNET_SEED` in the ignored `.env`. Use `TESTNET_SEED` for other development networks. Never put a private seed in tracked files or shell history.
+This command-scoped selector is accepted only when the configured RPC URL has a loopback host and the connected chain ID is `3151908`. That URL check is one fixture-selection guard; the startup bind check separately protects host exposure. When explicitly set, the selector takes precedence over a `TESTNET_SEED` in the ignored `.env`. Keep `QNS_PUBLIC_DEV_ACCOUNT` out of persistent `.env` files. Use `TESTNET_SEED` for other development networks. Never put a private seed in tracked files or shell history.
 
-Validated locally on 2026-08-23: the execution, beacon, and validator services produced blocks; six Hyperion contracts deployed; `alice.qrl` passed forward resolution, reverse resolution, and forward confirmation; raw precompile calls and the deployed wrapper passed SHAKE256 plus valid and invalid ML-DSA-87 checks.
+The initial deployment account remains the owner of `Root`, a Root controller, and the owner of `ReverseRegistrar`. Treat that account as an alpha administrator until the community selects a governance owner and an explicit controller-revocation plus ownership-transfer procedure. Do not renounce these roles before verifying the complete handoff on the target network.
+
+Validated locally on 2026-08-23: the execution, beacon, and validator services produced blocks; six Hyperion contracts deployed; `alice.qrl` passed forward resolution, reverse resolution, and forward confirmation; raw precompile calls and the deployed wrapper passed SHAKE256 plus valid and invalid ML-DSA-87 checks. The enclave was subsequently stopped to release host resources.
 
 ## License
 

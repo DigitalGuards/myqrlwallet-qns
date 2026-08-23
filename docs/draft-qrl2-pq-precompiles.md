@@ -16,7 +16,7 @@ This QIP adds two deterministic native operations to the QRL 2.0 execution layer
 
 Both operations use raw packed input and canonical 64-byte output values that match the QRL 2.0 virtual machine word size. Invalid or malformed verification input returns false. Out-of-gas behavior follows the normal precompile call path. The proposal also reserves Hyperion global builtins named `shake256` and `mldsa87verify` so contract authors can call the operations without hand-building static calls.
 
-The initial implementation targets unused precompile slots in go-qrl, includes compiler support in Hyperion, and is exercised by QNS contract and SDK groundwork. Fork activation, the final ML-DSA gas price, and publication of a compact interoperable verification vector remain review items before this draft advances.
+The initial implementation targets unused precompile slots in go-qrl, includes compiler support in Hyperion, and is exercised by QNS contract and SDK groundwork on a fresh-genesis local network. Fork activation, the final ML-DSA gas price, and publication of a compact interoperable verification vector remain review items before this draft advances.
 
 ## Motivation
 
@@ -123,7 +123,9 @@ Alternatives considered include a new opcode, contract-level cryptographic code,
 
 This proposal changes calls to native addresses `0x03` and `0x06`. Before activation, those addresses have no precompile behavior. Contracts that deliberately call either empty address could observe different success, gas, and return-data behavior after activation.
 
-The change therefore requires coordinated execution-client activation at a fork boundary. Hyperion compiler releases that emit these calls must identify the minimum compatible network revision. Contracts compiled with these builtins must not be deployed to an older network.
+The change therefore requires coordinated execution-client activation at a fork boundary. The current implementation is suitable only for a fresh-genesis network where every participant runs the same registry. Hyperion compiler releases that emit these calls must identify the minimum compatible network revision. Contracts compiled with these builtins must not be deployed to an older network.
+
+The go-qrl tracer fixture demonstrates that activation is observable beyond return data. With slots `0x03` and `0x06` active, the reconciled case reports three subtraces and `0x4d205` gas; its pre-activation form reported six subtraces and `0x1131d` gas. Mixed clients can therefore diverge in execution and tracing as soon as either address is called.
 
 No existing precompile address or ABI is modified. Existing contract bytecode that does not call the two reserved addresses retains its behavior.
 
@@ -140,7 +142,7 @@ The local composition pins `cyyber/qrysm@b53fd7c4` and `theQRL/qrl-genesis-gener
 
 Hyperion's CHC engine, backed by Z3 4.12.1, proved 36 source-coupled QNS security targets. These cover exact digest-boundary dispatch, every byte and index bound of `QNS-SIGN-v1`, deterministic formal calls, resolver capability predicates, unauthorized transition models, and reverse-index arithmetic. The proof gate rejects unsafe, unproved, unavailable, unsupported, missing, or unexpected targets. Hyperion models the cryptographic operations as deterministic uninterpreted functions, so concrete cryptographic security remains grounded in the pinned implementations and differential vectors.
 
-Public branch and commit links will be added after community review and before submission.
+Public branch and commit links accompany the community review. Submission will pin the final reviewed commits.
 
 ## Security Considerations
 

@@ -12,13 +12,17 @@
 | QNS | Script tests | 3 passed |
 | QNS SDK | TypeScript typecheck | Passed |
 | QNS SDK | Unit tests | 12 passed |
-| Local chain | Six proof-coupled contracts deployed | Passed |
+| Local chain | Six production contracts deployed; formal harnesses stayed off-chain | Passed |
 | Local chain | Forward, reverse, and forward-confirm resolution | Passed |
 | Local chain | Raw and wrapped cryptographic checks | 5 passed |
 | go-qrl | Focused precompile unit tests, vet, and fuzzing | Passed; 36,698 fuzz executions |
 | go-qrl | Five-run precompile benchmark | Passed |
 | go-qrl | Tracer fixture reconciliation | Passed |
 | go-qrl | Full repository test suite | Changed scope passed; pre-existing catalyst timing race reproduced on base `b92884a` |
+| Operator safety | Docker bind probe and post-start host-binding verification | Added; fails closed unless loopback or explicitly acknowledged |
+| Operator safety | Source revision labels and running service image-ID checks | Added |
+| Opsec | Live `config/testnet.json` removed from tracking and ignored | Resolved; local working file preserved |
+| Removed coverage | 15 forward plus 13 reverse Foundry behavior tests | Disclosed; Hyperion-native lifecycle replacement remains open |
 
 ## Formal toolchain
 

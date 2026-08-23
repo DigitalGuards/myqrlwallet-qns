@@ -28,4 +28,4 @@ Deployable contracts are listed in `scripts/compile-hyperion.js`:
 - SHAKE256 produces a fixed 64-byte digest.
 - ML-DSA-87 verification accepts a 64-byte digest, a 4627-byte signature, a 2592-byte public key, and up to 255 context bytes.
 
-The Solidity mirror and Foundry test path were removed during the QRL 2.0 migration. Contract behavior is validated through Hyperion compilation, compiler semantic tests, and local-network integration tests.
+The Solidity mirror and Foundry test path were removed during the QRL 2.0 migration, including 28 forward and reverse lifecycle tests. The current Hyperion compilation, formal policy, SDK, and local-network checks cover the new QRL 2.0 boundaries. A Hyperion-native behavioral harness still needs to restore re-registration, operator-approval, subnode-churn, and related lifecycle coverage before production.

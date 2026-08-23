@@ -12,3 +12,5 @@
 10. Is the canonical reverse label the Keccak-256 hash of all 128 lowercase hexadecimal address characters?
 11. Should the public QNS ABI continue using dynamic `bytes` for a 64-byte digest until the QRL web3 codec supports `bytes64`?
 12. Which independent reviewers should be listed as QIP authors, champion, and implementation reviewers?
+13. Which production governance address should receive Root and ReverseRegistrar ownership, and when should the deployer's temporary Root controller role be revoked?
+14. Which Hyperion-native harness should restore the 28 removed registry lifecycle tests before production?
