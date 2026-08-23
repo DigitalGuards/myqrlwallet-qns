@@ -1,100 +1,78 @@
 # QNS: QRL Name Service
 
-Post-quantum naming service for [QRL Zond](https://www.theqrl.org/zond). QNS is a port of [ENS v1](https://docs.ens.domains) to QRL Zond's Hyperion-compiled EVM, with the off-chain signature surface rebuilt on [ML-DSA-87](https://github.com/theQRL/qrypto.js) (`@theqrl/mldsa87`) for post-quantum safety.
+QNS is a Hyperion-native naming service for QRL 2.0. It keeps the stable ENS v1 registry model, uses native 64-byte QRL addresses, and adds post-quantum signing groundwork with SHAKE256 and ML-DSA-87.
 
-> **Status: alpha scaffolding.** This repo currently contains the architectural plan and empty contract/SDK skeletons. Phase 1 (forward resolution on Testnet V2) lands real Solidity sources. See `docs/ROADMAP.md`.
+Status: active QRL 2.0 migration work. The contracts compile only with the 64-byte Hyperion toolchain. The deployment recorded in `config/testnet.json` belongs to the legacy 20-byte Testnet V2 network and is retained as historical state. Use a fresh 64-byte network for new deployments.
 
-## Why
+## Design
 
-ENS solves a problem QRL Zond will need the moment dApps arrive: human-readable names pointing at addresses and content. Porting ENS is cheap (namehash is keccak256, which runs natively on Hyperion; ownership is enforced by `msg.sender`, which Zond handles at consensus with ML-DSA-87). The hard parts are address representation (24-byte QRL vs 20-byte Solidity `address`) and off-chain signed records, both of which have clean fallbacks via EIP-2304's multichain `addr(bytes32,uint256)` and a future ML-DSA precompile.
+- Hyperion is the sole contract source language.
+- `address` is the native 64-byte QRL type and occupies one 64-byte ABI word.
+- `addr(bytes32)` is the canonical forward record.
+- Reverse labels hash the 128 lowercase hex characters of a 64-byte address.
+- Namehash remains Keccak-256 based for ENS compatibility.
+- `QRLSignatureVerifier` exposes SHAKE256-512 digests and ML-DSA-87 verification with the `QNS-SIGN-v1` context.
+- There is no ECDSA or `ecrecover` path.
 
-Beyond name resolution, QNS adds a **pubkey resolver record** for publishing ML-DSA-87 public keys (2,592 bytes) as first-class name-indexed identity artifacts. ENS has no equivalent.
+## Structure
 
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                       User / dApp                            │
-└───────────────────────────┬──────────────────────────────────┘
-                            │ resolveName("alice.qrl")
-                            ▼
-┌──────────────────────────────────────────────────────────────┐
-│                      @qns/sdk (qnsjs)                        │
-│  - namehash (keccak256, EIP-137)                             │
-│  - registry > resolver walk, forward + reverse (ENSIP-19)    │
-│  - provider: any EIP-1193 (recommended: @qrlwallet/connect)  │
-└───────────────────────────┬──────────────────────────────────┘
-                            │ eth_call
-                            ▼
-┌──────────────────────────────────────────────────────────────┐
-│                       QNS Contracts                          │
-│                                                              │
-│  ┌─────────────┐   ┌────────────────┐   ┌────────────────┐   │
-│  │ ENSRegistry │──▶│ PublicResolver │   │ FIFSQRLRegistrar│  │
-│  │  (vendored) │   │  + profiles    │   │  (custom)      │   │
-│  └─────────────┘   └────────────────┘   └────────────────┘   │
-│                                                              │
-│  ┌────────────────┐   ┌──────────────────┐                   │
-│  │ ReverseRegistrar│  │ UniversalResolver │                  │
-│  └────────────────┘   └──────────────────┘                   │
-└──────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-                   QRL Zond Testnet V2
-                   (gqrl + qrysm, chainId 1337)
+```text
+contracts/hyperion/   Canonical registry, resolver, registrar, and crypto contracts
+sdk/                  TypeScript namehash, resolution, and precompile helpers
+scripts/              Hyperion compilation, deployment, and integration checks
+config/               Network configuration and deployment records
+docs/                 Protocol decisions, migration notes, and QIP groundwork
 ```
 
-## Project Structure
-
-```
-myqrlwallet-qns/
-├── contracts/
-│   ├── solidity/             # Source of truth (ENS-style)
-│   │   ├── registry/         # ENSRegistry, Root, FIFSQRLRegistrar
-│   │   ├── resolvers/        # PublicResolver + profiles (IQRLAddrResolver, text, contenthash)
-│   │   ├── reverseRegistrar/
-│   │   ├── utils/            # UniversalResolver
-│   │   └── vendored/         # Pinned ens-contracts copy (Phase 1)
-│   ├── hyperion/             # Auto-synced .hyp mirrors (QuantaPool-style)
-│   └── test/                 # Foundry test suite
-├── sdk/                      # @qns/sdk TypeScript library
-│   └── src/                  # namehash, resolveName, lookupAddress
-├── scripts/                  # Deployment and maintenance
-├── config/                   # Network + deployed address map
-└── docs/
-    ├── PORT-PLAN.md          # Full technical port plan
-    ├── ADDRESS-COMPATIBILITY.md  # Path A dual-stack resolver design
-    ├── CRYPTO-INTEGRATION.md # ML-DSA-87 signed records plan
-    ├── ROADMAP.md            # 5-phase delivery plan
-    └── OPEN-QUESTIONS.md     # 7 open questions for QRL core-devs
-```
-
-## Phases (see `docs/ROADMAP.md`)
-
-1. **Forward resolution** (alpha, Phase 1): Registry + FIFS `.qrl` + PublicResolver, `qnsjs.resolveName()`.
-2. **Reverse + UniversalResolver**: `addr.reverse`, one-RPC lookups.
-3. **Records**: text, contenthash, multichain addresses.
-4. **ML-DSA signed records**: ENSIP-19 reverse via signatures, CCIP-Read gateway, pubkey resolver record.
-5. **Mainnet + economics**: commit/reveal registrar, pricing, QIP.
-
-## Quick Start
+## Build and test
 
 ```bash
-# Contracts (Foundry)
-forge build
-forge test
-
-# SDK (once Phase 1 lands)
-cd sdk && npm install && npm run build && npm test
+npm install
+npm --prefix sdk install
+HYPERION_COMPILER=../hyperion/build/hypc/hypc npm test
 ```
 
-## Related
+The test command compiles every deployable contract with Hyperion, type-checks the SDK, and runs its unit tests.
 
-- **ENS reference**: [ensdomains/ens-contracts](https://github.com/ensdomains/ens-contracts), [docs.ens.domains](https://docs.ens.domains)
-- **Crypto**: [theQRL/qrypto.js](https://github.com/theQRL/qrypto.js), `@theqrl/mldsa87` v1.1.1 (Halborn-audited 2026-03-31)
-- **Provider**: [`@qrlwallet/connect`](https://github.com/DigitalGuards/myqrlwallet-connect) v2+ (post-quantum ML-KEM-768 dApp↔wallet session, EIP-1193)
-- **Workspace sibling**: [`../QuantaPool`](../QuantaPool) shares the Foundry + Hyperion toolchain pattern
+Build Hyperion with Z3 support and run the reproducible formal security gate with:
+
+```bash
+HYPERION_FORMAL_COMPILER=../hyperion/build-formal/hypc/hypc npm run verify:formal
+```
+
+The gate currently proves 36 CHC targets covering the cryptographic boundary, exact QNS context bytes, resolver capabilities, unauthorized transitions, and 64-byte reverse-index arithmetic. See [`docs/FORMAL-SECURITY-VERIFICATION.md`](docs/FORMAL-SECURITY-VERIFICATION.md) for the threat model, exact claims, evidence classes, and assumptions.
+
+## Local QRL 2.0 network
+
+The sibling `qrl-package/` checkout contains Cyyber's Kurtosis package with 64-byte genesis accounts. The published Qrysm `latest` images inspected on 2026-08-23 predated the 64-byte changes, so this repository builds pinned beacon, validator, and genesis-generator images from source.
+
+```bash
+npm run build:local-network
+npm run kurtosis:start
+kurtosis enclave inspect qrl2-qns
+```
+
+The local node image is built from the sibling `go-qrl/` precompile branch. Qrysm is pinned to `cyyber/qrysm@b53fd7c4`, and the genesis generator is pinned to `theQRL/qrl-genesis-generator@6a11fbce`. The start script builds any missing local image automatically.
+
+Copy the reported execution RPC URL into `config/local-qip55.json`, compile, and deploy with:
+
+```bash
+HYPERION_COMPILER=../hyperion/build/hypc/hypc npm run compile
+QNS_CONFIG=config/local-qip55.json npm run deploy:testnet
+```
+
+Select one of the public development accounts supplied by the Kurtosis package without copying its seed into your shell:
+
+```bash
+QNS_PUBLIC_DEV_ACCOUNT=0 npm run deploy:testnet
+QNS_PUBLIC_DEV_ACCOUNT=0 npm run register -- alice
+npm run verify:pq
+```
+
+This selector is accepted only for a loopback RPC on local Kurtosis chain `3151908`. When explicitly set, it takes precedence over a `TESTNET_SEED` in the ignored `.env`. Use `TESTNET_SEED` for other development networks. Never put a private seed in tracked files or shell history.
+
+Validated locally on 2026-08-23: the execution, beacon, and validator services produced blocks; six Hyperion contracts deployed; `alice.qrl` passed forward resolution, reverse resolution, and forward confirmation; raw precompile calls and the deployed wrapper passed SHAKE256 plus valid and invalid ML-DSA-87 checks.
 
 ## License
 
-GPL-3.0. See `LICENSE`. ENS reference sources are MIT; the `vendored/` directory includes upstream license text alongside pinned copies.
+GPL-3.0. The Hyperion files under `contracts/hyperion/vendored/` retain the upstream ENS and OpenZeppelin notices applicable to their source.

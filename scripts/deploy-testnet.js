@@ -1,11 +1,10 @@
-// Deploy QNS Phase 1 contract stack to QRL Zond Testnet V2.
-// Uses Foundry-compiled bytecode (out/*.json) directly via @theqrl/web3.
+// Deploy the QNS Hyperion contract stack to a QRL 2.0 network.
 //
 // Usage:
-//   npm run compile            # forge build, produces out/
-//   npm run deploy:testnet     # reads config/testnet.json, writes back addresses
+//   npm run compile
+//   QNS_CONFIG=config/local-qip55.json npm run deploy:testnet
 //
-// Requires TESTNET_SEED in .env (34-word ML-DSA-87 mnemonic).
+// Set TESTNET_SEED, or use QNS_PUBLIC_DEV_ACCOUNT on the local Kurtosis network.
 
 const fs = require("fs");
 const path = require("path");
@@ -13,38 +12,16 @@ const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { Web3 } = require("@theqrl/web3");
-const { loadDeployer } = require("./lib/loadDeployer");
+const { loadDeployerFromEnvironment } = require("./lib/loadDeployer");
 
 const repoRoot = path.join(__dirname, "..");
-const configPath = path.join(repoRoot, "config", "testnet.json");
-const foundryOutDir = path.join(repoRoot, "out");
+const configPath = process.env.QNS_CONFIG
+    ? path.resolve(repoRoot, process.env.QNS_CONFIG)
+    : path.join(repoRoot, "config", "local-qip55.json");
 const hyperionArtifactsDir = path.join(repoRoot, "build", "hyperion");
-
-// "hyperion" (preferred, canonical for mainnet per QRL team recommendation)
-// or "foundry" (falls back to solc bytecode). Env override:
-//   BUILD=foundry npm run deploy:testnet
-const BUILD_TARGET = (process.env.BUILD || "hyperion").toLowerCase();
 
 function loadJson(p) {
     return JSON.parse(fs.readFileSync(p, "utf8"));
-}
-
-function loadFoundryArtifact(contractName) {
-    const artifactPath = path.join(
-        foundryOutDir,
-        `${contractName}.sol`,
-        `${contractName}.json`
-    );
-    if (!fs.existsSync(artifactPath)) {
-        throw new Error(
-            `Foundry artifact not found: ${artifactPath}. Run \`forge build\` first.`
-        );
-    }
-    const artifact = loadJson(artifactPath);
-    if (!artifact.bytecode || !artifact.bytecode.object) {
-        throw new Error(`Foundry artifact ${contractName} has no bytecode.object`);
-    }
-    return { abi: artifact.abi, bytecode: artifact.bytecode.object };
 }
 
 function loadHyperionArtifact(contractName) {
@@ -62,21 +39,8 @@ function loadHyperionArtifact(contractName) {
     return { abi, bytecode };
 }
 
-function loadArtifact(contractName) {
-    return BUILD_TARGET === "foundry"
-        ? loadFoundryArtifact(contractName)
-        : loadHyperionArtifact(contractName);
-}
-
-function getAccount(web3) {
-    if (!process.env.TESTNET_SEED) {
-        throw new Error("TESTNET_SEED environment variable is required");
-    }
-    return loadDeployer(web3, process.env.TESTNET_SEED);
-}
-
 async function deployContract(web3, account, contractName, constructorArgs = []) {
-    const artifact = loadArtifact(contractName);
+    const artifact = loadHyperionArtifact(contractName);
     console.log(`\nDeploying ${contractName}${constructorArgs.length ? `(${constructorArgs.join(", ")})` : ""}...`);
 
     const contract = new web3.qrl.Contract(artifact.abi);
@@ -142,7 +106,7 @@ async function main() {
     console.log(`Provider:        ${config.rpcUrl}`);
     console.log(`Expected chainId: ${config.chainId}`);
     console.log(`TLD:             .${config.tld}`);
-    console.log(`Build target:    ${BUILD_TARGET} (override with BUILD=foundry|hyperion)`);
+    console.log("Build target:    hyperion");
 
     const web3 = new Web3(config.rpcUrl);
     const chainId = await web3.qrl.getChainId();
@@ -153,7 +117,11 @@ async function main() {
         );
     }
 
-    const account = getAccount(web3);
+    const account = loadDeployerFromEnvironment(web3, {
+        repoRoot,
+        rpcUrl: config.rpcUrl,
+        chainId,
+    });
     console.log(`Deployer: ${account.address}`);
     const balance = await web3.qrl.getBalance(account.address);
     console.log(`Balance: ${web3.utils.fromPlanck(balance, "quanta")} QRL`);
@@ -164,12 +132,12 @@ async function main() {
     console.log(`TLD namehash:  ${tldNode}`);
 
     // ------------------------------------------------------------
-    // 1. ENSRegistry — deployer initially owns the root node.
+    // 1. ENSRegistry: deployer initially owns the root node.
     // ------------------------------------------------------------
     const registry = await deployContract(web3, account, "ENSRegistry");
 
     // ------------------------------------------------------------
-    // 2. Root — takes the registry, then we hand root-node ownership to it.
+    // 2. Root takes the registry, then we hand root-node ownership to it.
     // ------------------------------------------------------------
     const root = await deployContract(web3, account, "Root", [
         registry.options.address,
@@ -190,7 +158,7 @@ async function main() {
     );
 
     // ------------------------------------------------------------
-    // 3. FIFSQRLRegistrar(registry, tldNode) — will own the .qrl TLD.
+    // 3. FIFSQRLRegistrar(registry, tldNode) will own the .qrl TLD.
     // ------------------------------------------------------------
     const fifs = await deployContract(web3, account, "FIFSQRLRegistrar", [
         registry.options.address,
@@ -239,7 +207,7 @@ async function main() {
     );
 
     // ------------------------------------------------------------
-    // 5. QRLPublicResolver(registry, reverseRegistrar) — trusts the
+    // 5. QRLPublicResolver(registry, reverseRegistrar) trusts the
     //    reverseRegistrar as an authorised setName() caller.
     // ------------------------------------------------------------
     const resolver = await deployContract(web3, account, "QRLPublicResolver", [
@@ -248,7 +216,16 @@ async function main() {
     ]);
 
     // ------------------------------------------------------------
-    // 6. Point reverseRegistrar's defaultResolver at QRLPublicResolver.
+    // 6. Deploy the QNS adapter for SHAKE256 and ML-DSA-87 verification.
+    // ------------------------------------------------------------
+    const signatureVerifier = await deployContract(
+        web3,
+        account,
+        "QRLSignatureVerifier"
+    );
+
+    // ------------------------------------------------------------
+    // 7. Point reverseRegistrar's defaultResolver at QRLPublicResolver.
     // ------------------------------------------------------------
     await sendTx(
         reverseRegistrar.methods.setDefaultResolver(resolver.options.address),
@@ -268,10 +245,11 @@ async function main() {
         FIFSQRLRegistrar: fifs.options.address,
         ReverseRegistrar: reverseRegistrar.options.address,
         QRLPublicResolver: resolver.options.address,
+        QRLSignatureVerifier: signatureVerifier.options.address,
     };
     config.deployedAt = new Date().toISOString();
     config.deployer = account.address;
-    config.buildTarget = BUILD_TARGET;
+    config.buildTarget = "hyperion";
 
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 

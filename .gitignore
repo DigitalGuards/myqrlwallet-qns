@@ -3,13 +3,9 @@
 .env.*
 !.env.example
 
-# Foundry build artifacts
-cache/
-out/
-broadcast/
-
 # Hyperion build artifacts
 build/hyperion/
+/config/local-qip55.json
 
 # Node
 node_modules/

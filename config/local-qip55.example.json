@@ -1,0 +1,14 @@
+{
+  "network": "qrl2-kurtosis-local",
+  "chainId": 3151908,
+  "rpcUrl": "http://127.0.0.1:32002",
+  "tld": "qrl",
+  "contracts": {
+    "ENSRegistry": null,
+    "Root": null,
+    "FIFSQRLRegistrar": null,
+    "ReverseRegistrar": null,
+    "QRLPublicResolver": null,
+    "QRLSignatureVerifier": null
+  }
+}

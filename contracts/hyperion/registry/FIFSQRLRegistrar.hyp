@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Generated from contracts/solidity/registry/FIFSQRLRegistrar.sol by scripts/sync-hyperion.js.
-// Edit the Solidity source, then re-run this script.
 pragma hyperion >=0.0;
 
 import {ENS} from "../vendored/registry/ENS.hyp";

@@ -1,5 +1,3 @@
-// Generated from contracts/solidity/vendored/registry/ENS.sol by scripts/sync-hyperion.js.
-// Edit the Solidity source, then re-run this script.
 //SPDX-License-Identifier: MIT
 pragma hyperion >=0.0;
 

@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+import {QRLAddressReverse} from "../../contracts/hyperion/vendored/reverseRegistrar/QRLAddressReverse.hyp";
+
+/// @notice Executable SMTChecker lemmas used by the native 64-byte reverse
+///         encoder. The production loop calls these same helpers.
+contract QNSReverseSafetyProperties {
+    function provePairBounds(uint8 index) public pure {
+        require(index < 64);
+        uint256 offset = QRLAddressReverse.pairOffset(index);
+
+        assert(offset < 128);
+        assert(offset + 1 < 128);
+    }
+
+    function provePairInjective(uint8 left, uint8 right) public pure {
+        require(left < 64 && right < 64);
+        uint256 leftOffset = QRLAddressReverse.pairOffset(left);
+        uint256 rightOffset = QRLAddressReverse.pairOffset(right);
+
+        if (left != right) {
+            assert(leftOffset != rightOffset);
+        }
+        if (left < right) {
+            assert(leftOffset + 1 < rightOffset);
+        }
+    }
+
+    function proveNibbleBounds(uint8 value) public pure {
+        assert(QRLAddressReverse.highNibble(value) < 16);
+        assert(QRLAddressReverse.lowNibble(value) < 16);
+    }
+}

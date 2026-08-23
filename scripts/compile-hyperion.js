@@ -1,4 +1,4 @@
-// Compile the synced Hyperion sources with hypc.
+// Compile the canonical Hyperion sources with hypc.
 // Walks contracts/hyperion/ and compiles each deployable top-level contract,
 // emitting ABI + bytecode to build/hyperion/ with a manifest.json.
 //
@@ -9,8 +9,6 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync, spawnSync } = require("child_process");
-
-const { syncHyperionSources } = require("./sync-hyperion");
 
 const repoRoot = path.join(__dirname, "..");
 const hyperionRoot = path.join(repoRoot, "contracts", "hyperion");
@@ -25,6 +23,7 @@ const DEPLOYABLE = [
     "vendored/reverseRegistrar/ReverseRegistrar.hyp",
     "registry/FIFSQRLRegistrar.hyp",
     "resolvers/QRLPublicResolver.hyp",
+    "crypto/QRLSignatureVerifier.hyp",
 ];
 
 function ensureCompilerAvailable() {
@@ -56,14 +55,14 @@ function discoverPrimaryContractName(source) {
     if (matches.length === 0) {
         throw new Error("No contract definition found in Hyperion source.");
     }
-    // Last contract declared in the file wins — matches QuantaPool behaviour.
+    // Last contract declared in the file wins; this matches QuantaPool behaviour.
     return matches[matches.length - 1][1];
 }
 
 function compileOne(relHypPath) {
     const sourcePath = path.join(hyperionRoot, relHypPath);
     if (!fs.existsSync(sourcePath)) {
-        throw new Error(`Missing ${relHypPath} — run sync-hyperion first.`);
+        throw new Error(`Missing canonical Hyperion source: ${relHypPath}`);
     }
     const source = fs.readFileSync(sourcePath, "utf8");
     const contractName = discoverPrimaryContractName(source);
@@ -94,7 +93,6 @@ function compileOne(relHypPath) {
 }
 
 function compileAll() {
-    syncHyperionSources();
     ensureCompilerAvailable();
     clearArtifactsDir();
 

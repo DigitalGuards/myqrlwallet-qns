@@ -1,18 +1,16 @@
-// Generated from contracts/solidity/vendored/reverseRegistrar/ReverseRegistrar.sol by scripts/sync-hyperion.js.
-// Edit the Solidity source, then re-run this script.
+// SPDX-License-Identifier: MIT
 pragma hyperion >=0.0;
 
 import "../openzeppelin/access/Ownable.hyp";
 
 import "../registry/ENS.hyp";
 import "./IReverseRegistrar.hyp";
+import "./QRLAddressReverse.hyp";
 import "../root/Controllable.hyp";
 
 abstract contract NameResolver {
     function setName(bytes32 node, string memory name) public virtual;
 }
-
-bytes32 constant lookup = 0x3031323334353637383961626364656600000000000000000000000000000000;
 
 bytes32 constant ADDR_REVERSE_NODE = 0x91d1777781884d03a6757a803996e38de2a42967fb37eeaca72729271025a9e2;
 
@@ -145,26 +143,13 @@ contract ReverseRegistrar is Controllable, IReverseRegistrar {
             );
     }
 
-    /// @dev An optimised function to compute the sha3 of the lower-case
-    ///      hexadecimal representation of an Ethereum address.
+    /// @dev Computes the SHA3 hash of the lower-case hexadecimal
+    ///      representation of a native 64-byte QRL address.
     /// @param addr The address to hash
     /// @return ret The SHA3 hash of the lower-case hexadecimal encoding of the
     ///         input address.
-    function sha3HexAddress(address addr) private pure returns (bytes32 ret) {
-        assembly {
-            for {
-                let i := 40
-            } gt(i, 0) {} {
-                i := sub(i, 1)
-                mstore8(i, byte(and(addr, 0xf), lookup))
-                addr := div(addr, 0x10)
-                i := sub(i, 1)
-                mstore8(i, byte(and(addr, 0xf), lookup))
-                addr := div(addr, 0x10)
-            }
-
-            ret := keccak256(0, 40)
-        }
+    function sha3HexAddress(address addr) private pure returns (bytes32) {
+        return QRLAddressReverse.labelHash(addr);
     }
 
     function ownsContract(address addr) internal view returns (bool) {
