@@ -74,7 +74,8 @@ async function main() {
     const nameLabel = process.argv[2] || "alice";
 
     const config = loadJson(configPath);
-    if (!config.contracts?.ENSRegistry) {
+    const registryAddress = config.contracts?.QNSRegistry ?? config.contracts?.ENSRegistry;
+    if (!registryAddress) {
         throw new Error(`${configPath} is missing contracts. Run deploy:testnet first.`);
     }
 
@@ -82,7 +83,7 @@ async function main() {
     console.log(`QNS integration test: ${nameLabel}.${config.tld}`);
     console.log("=".repeat(60));
     console.log(`Provider:   ${config.rpcUrl}`);
-    console.log(`Registry:   ${config.contracts.ENSRegistry}`);
+    console.log(`Registry:   ${registryAddress}`);
     console.log(`Resolver:   ${config.contracts.QRLPublicResolver}`);
     console.log(`FIFS:       ${config.contracts.FIFSQRLRegistrar}`);
 
@@ -99,8 +100,8 @@ async function main() {
     console.log(`Caller:     ${account.address}`);
 
     const registry = new web3.qrl.Contract(
-        loadAbi("ENSRegistry"),
-        config.contracts.ENSRegistry
+        loadAbi("QNSRegistry"),
+        registryAddress
     );
     const fifs = new web3.qrl.Contract(
         loadAbi("FIFSQRLRegistrar"),
@@ -213,7 +214,7 @@ async function main() {
     console.log("\n[5/6] SDK forward resolve");
     const sdk = await import(pathToFileURL(path.join(sdkDistDir, "index.js")).href);
     const provider = makeSdkProvider(web3);
-    const cfg = { registry: config.contracts.ENSRegistry, provider };
+    const cfg = { registry: registryAddress, provider };
 
     const sdkNode = sdk.nodeToHex(sdk.namehash(fullName));
     console.log(`  SDK namehash:    ${sdkNode}`);

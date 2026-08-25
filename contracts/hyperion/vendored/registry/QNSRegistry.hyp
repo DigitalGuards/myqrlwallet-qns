@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma hyperion >=0.0;
 
-import "./ENS.hyp";
+import "./IQNSRegistry.hyp";
 
-/// The ENS registry contract.
-contract ENSRegistry is ENS {
+/// The QNS registry contract, ported from the ENS v1 registry (see ../DIFFS.md).
+contract QNSRegistry is IQNSRegistry {
     struct Record {
         address owner;
         address resolver;
@@ -21,7 +21,7 @@ contract ENSRegistry is ENS {
         _;
     }
 
-    /// @dev Constructs a new ENS registry.
+    /// @dev Constructs a new QNS registry.
     // QNS DIFF vs ensdomains/ens-contracts@v1.6.2: removed `public` from
     // constructor (deprecated since Solidity 0.7). See vendored/DIFFS.md.
     constructor() {
@@ -109,7 +109,7 @@ contract ENSRegistry is ENS {
     }
 
     /// @dev Enable or disable approval for a third party ("operator") to manage
-    ///      all of `msg.sender`'s ENS records. Emits the ApprovalForAll event.
+    ///      all of `msg.sender`'s QNS records. Emits the ApprovalForAll event.
     /// @param operator Address to add to the set of authorized operators.
     /// @param approved True if the operator is approved, false to revoke approval.
     function setApprovalForAll(

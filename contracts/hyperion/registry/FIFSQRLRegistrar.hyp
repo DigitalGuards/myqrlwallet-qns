@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma hyperion >=0.0;
 
-import {ENS} from "../vendored/registry/ENS.hyp";
+import {IQNSRegistry} from "../vendored/registry/IQNSRegistry.hyp";
 
 /// @title FIFSQRLRegistrar
 /// @notice First-in-first-served registrar for a single TLD node under a QNS
@@ -9,7 +9,7 @@ import {ENS} from "../vendored/registry/ENS.hyp";
 ///         subnode by calling `register(label, owner)`.
 ///
 /// Permissioning model:
-///   - The ENS registry must have this contract set as owner of `baseNode`.
+///   - The QNS registry must have this contract set as owner of `baseNode`.
 ///     Typical setup: `Root.setSubnodeOwner(labelhash("qrl"), fifsAddr)`.
 ///   - Once the TLD is owned by this registrar, `register(label, owner)`
 ///     writes `subnode = keccak(baseNode || label)` with `owner` in the
@@ -20,15 +20,15 @@ import {ENS} from "../vendored/registry/ENS.hyp";
 /// Suitable for Testnet V2. Phase 5 replaces with a commit/reveal + pricing
 /// controller modeled on ETHRegistrarController.
 contract FIFSQRLRegistrar {
-    ENS public immutable ens;
+    IQNSRegistry public immutable qns;
     bytes32 public immutable baseNode;
 
     error NotAvailable(bytes32 label, address currentOwner);
 
     event Registered(bytes32 indexed label, address indexed owner);
 
-    constructor(ENS _ens, bytes32 _baseNode) {
-        ens = _ens;
+    constructor(IQNSRegistry _qns, bytes32 _baseNode) {
+        qns = _qns;
         baseNode = _baseNode;
     }
 
@@ -39,17 +39,17 @@ contract FIFSQRLRegistrar {
     /// @param owner The new owner address for the subnode.
     function register(bytes32 label, address owner) external {
         bytes32 subnode = keccak256(abi.encodePacked(baseNode, label));
-        address currentOwner = ens.owner(subnode);
+        address currentOwner = qns.owner(subnode);
         if (currentOwner != address(0) && currentOwner != msg.sender) {
             revert NotAvailable(label, currentOwner);
         }
-        ens.setSubnodeOwner(baseNode, label, owner);
+        qns.setSubnodeOwner(baseNode, label, owner);
         emit Registered(label, owner);
     }
 
     /// @notice Returns true if the subnode is unclaimed (owner == 0x0).
     function available(bytes32 label) external view returns (bool) {
         bytes32 subnode = keccak256(abi.encodePacked(baseNode, label));
-        return ens.owner(subnode) == address(0);
+        return qns.owner(subnode) == address(0);
     }
 }

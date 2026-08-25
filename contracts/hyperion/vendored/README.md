@@ -15,7 +15,7 @@ The selected registry, resolver-profile, root, and reverse-registrar files retai
 
 ## Included scope
 
-- `registry/`: ENS registry interface and implementation.
+- `registry/`: the QNS registry interface (`IQNSRegistry`) and implementation (`QNSRegistry`), ported from the ENS v1 registry.
 - `root/`: root ownership and controller management.
 - `resolvers/`: resolver base and the address, text, contenthash, name, and version interfaces.
 - `reverseRegistrar/`: basic transaction-sender reverse registration.

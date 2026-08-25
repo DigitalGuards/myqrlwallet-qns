@@ -12,7 +12,7 @@ Artifacts are written to `build/hyperion/` and remain untracked. `manifest.json`
 
 Deployable contracts are listed in `scripts/compile-hyperion.js`:
 
-- `ENSRegistry`
+- `QNSRegistry` (vendored registry, ported from ENS v1)
 - `Root`
 - `ReverseRegistrar`
 - `FIFSQRLRegistrar`

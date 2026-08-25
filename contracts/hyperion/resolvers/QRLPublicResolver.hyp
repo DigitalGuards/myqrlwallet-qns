@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma hyperion >=0.0;
 
-import {ENS} from "../vendored/registry/ENS.hyp";
+import {IQNSRegistry} from "../vendored/registry/IQNSRegistry.hyp";
 import {ResolverBase} from "../vendored/resolvers/ResolverBase.hyp";
 import {IAddrResolver} from "../vendored/resolvers/profiles/IAddrResolver.hyp";
 import {ITextResolver} from "../vendored/resolvers/profiles/ITextResolver.hyp";
@@ -14,7 +14,7 @@ import {QRLResolverAuthorization} from "./QRLResolverAuthorization.hyp";
 ///         Supports `IAddrResolver`, `ITextResolver`, `IContentHashResolver`,
 ///         and reverse names.
 ///
-/// Authorisation: only the current owner of a node in the ENS registry can
+/// Authorisation: only the current owner of a node in the QNS registry can
 /// write records. The trusted reverse registrar has the narrower ability to
 /// call `setName`, which is required after it assigns a reverse node to its
 /// final owner. The underlying `ResolverBase` provides ERC165 + versioned
@@ -32,7 +32,7 @@ contract QRLPublicResolver is
     IContentHashResolver,
     INameResolver
 {
-    ENS public immutable ens;
+    IQNSRegistry public immutable qns;
     /// Trusted reverse registrar, allowed to call setName() even when it is
     /// not the registry owner. This capability does not apply to other record
     /// setters or clearRecords. Settable once at deploy time.
@@ -46,19 +46,19 @@ contract QRLPublicResolver is
 
     error NotAuthorised(bytes32 node, address caller);
 
-    constructor(ENS _ens, address _trustedReverseRegistrar) {
-        ens = _ens;
+    constructor(IQNSRegistry _qns, address _trustedReverseRegistrar) {
+        qns = _qns;
         trustedReverseRegistrar = _trustedReverseRegistrar;
     }
 
     /// @inheritdoc ResolverBase
     function isAuthorised(bytes32 node) internal view override returns (bool) {
-        return QRLResolverAuthorization.canWrite(ens.owner(node), msg.sender);
+        return QRLResolverAuthorization.canWrite(qns.owner(node), msg.sender);
     }
 
     modifier authorisedName(bytes32 node) {
         if (!QRLResolverAuthorization.canSetName(
-            ens.owner(node),
+            qns.owner(node),
             msg.sender,
             trustedReverseRegistrar
         )) {

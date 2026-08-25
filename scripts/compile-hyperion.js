@@ -18,7 +18,7 @@ const compilerBinary = process.env.HYPERION_COMPILER || process.env.HYPC_BIN || 
 // Top-level deployable contracts (relative paths under contracts/hyperion/).
 // Interfaces/abstract files compile as transitive deps but are not listed here.
 const DEPLOYABLE = [
-    "vendored/registry/ENSRegistry.hyp",
+    "vendored/registry/QNSRegistry.hyp",
     "vendored/root/Root.hyp",
     "vendored/reverseRegistrar/ReverseRegistrar.hyp",
     "registry/FIFSQRLRegistrar.hyp",

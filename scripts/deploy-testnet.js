@@ -132,9 +132,9 @@ async function main() {
     console.log(`TLD namehash:  ${tldNode}`);
 
     // ------------------------------------------------------------
-    // 1. ENSRegistry: deployer initially owns the root node.
+    // 1. QNSRegistry: deployer initially owns the root node.
     // ------------------------------------------------------------
-    const registry = await deployContract(web3, account, "ENSRegistry");
+    const registry = await deployContract(web3, account, "QNSRegistry");
 
     // ------------------------------------------------------------
     // 2. Root takes the registry, then we hand root-node ownership to it.
@@ -240,7 +240,7 @@ async function main() {
         config.previousContracts = config.contracts;
     }
     config.contracts = {
-        ENSRegistry: registry.options.address,
+        QNSRegistry: registry.options.address,
         Root: root.options.address,
         FIFSQRLRegistrar: fifs.options.address,
         ReverseRegistrar: reverseRegistrar.options.address,
