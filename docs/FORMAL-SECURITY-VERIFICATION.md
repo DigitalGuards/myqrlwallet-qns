@@ -1,6 +1,6 @@
 # Formal security verification
 
-Status: 36 Hyperion CHC targets proved safe on 2026-08-23. Six production contracts were compiled through the legacy and via-IR paths, deployed to the local 64-byte Kurtosis network, and exercised end to end. The two formal harness contracts were compiled for proof and remained off-chain.
+Status: 36 Hyperion CHC targets proved safe on the aligned tree on 2026-08-26. Six production contracts compiled through the legacy and via-IR paths, deployed to the activated local 64-byte Kurtosis network, and ran through the SDK, cryptographic, lifecycle, and authorization checks. The two formal harness contracts remained off-chain.
 
 ## Scope
 
@@ -14,7 +14,7 @@ The formal harness covers the new QNS security boundaries introduced for QRL 2.0
 - transition lemmas showing that unauthorized callers leave owner-only records unchanged
 - native 64-byte reverse-label pair offsets, pair separation, nibble ranges, arithmetic overflow, and division safety
 
-The review also tracks go-qrl precompile parsing, canonical output, gas behavior, compiler lowering, SDK parity, and live execution. Those checks use unit tests, fuzzing, semantic tests, benchmarks, differential vectors, and Kurtosis integration evidence.
+The review also tracks go-qrl precompile parsing, success and failure return conventions, gas behavior, compiler lowering, SDK parity, and live execution. Those checks use unit tests, fuzzing, semantic tests, benchmarks, differential vectors, and Kurtosis integration evidence.
 
 ## Attacker model
 
@@ -23,7 +23,7 @@ An attacker can submit arbitrary contract calls, byte arrays, message digests, s
 The trusted computing base contains:
 
 - go-qrl precompile registration and execution
-- Go's SHAKE256 implementation and the pinned go-qrllib ML-DSA-87 verifier
+- Go's SHAKE256 implementation and the resolved ML-DSA-87 module: declared as `theQRL/go-qrllib v0.8.0` and replaced by `rgeraldes24/go-qrllib` commit `a6d78f111b1f`
 - Hyperion parsing, type checking, both code generators, ABI lowering, and SMT encoding
 - QRVM execution semantics
 - Z3 4.12.1
@@ -95,8 +95,8 @@ The production reverse encoder allocates 128 bytes, loops while `i < 64`, and ca
 | Reverse pair bounds, separation, nibble bounds, and arithmetic | Unbounded CHC proof over production helpers | Proved safe |
 | Formal consistency of new Hyperion builtins | Compiler SMT regression plus CHC proof | Passed |
 | SHAKE256 output bytes | Standard known vectors in Go, Hyperion semantics, and live raw calls | Passed |
-| ML-DSA-87 valid and invalid behavior | Pinned Go library tests, Hyperion semantics, JavaScript differential check, and live raw calls | Passed |
-| Canonical 64-byte boolean output | Go unit tests and live raw calls | Passed |
+| ML-DSA-87 valid and invalid behavior | Resolved Go library tests, Hyperion semantics, JavaScript differential checks, and live raw calls | Passed |
+| Empty-data and canonical-zero failure compatibility | Hyperion execution-host fixtures for both candidates | Passed |
 | Malformed input never reaches unsafe slices | Length gate, Go unit tests, and fuzzing | Passed |
 | Legacy and via-IR compiler lowering | Hyperion semantic tests and six-contract builds through both paths | Passed |
 | Full 128-character reverse encoding | SDK parity tests and live forward, reverse, and forward-confirm flow | Passed |
@@ -112,11 +112,11 @@ The authorization proof assumes `ens.owner(node)` supplies the registry owner us
 
 The reverse proof establishes universal helper lemmas and their production source composition. Dynamic-memory loop semantics are covered by compiler runtime checks, SDK parity, and live integration evidence.
 
-The migration removed the Foundry toolchain and its 28 Solidity behavior tests: 15 forward-resolution tests and 13 reverse-resolution tests. The Hyperion compile gates, focused policy proofs, SDK tests, and live flows cover the new QRL 2.0 boundaries, but they do not replace all registry lifecycle and state-transition coverage. Re-registration, operator approvals, and subnode churn need a Hyperion-native behavioral harness before production deployment.
+The migration removed the Foundry toolchain and its 28 Solidity behavior tests: 15 forward-resolution tests and 13 reverse-resolution tests. The new live Hyperion suite restores eight high-value lifecycle and authorization cases covering compatibility aliases, fresh registration, duplicate rejection, owner reassignment, unauthorized subnode and resolver writes, reverse-node parity, and scoped reverse claims. The formal policy proofs cover the trusted-registrar capability that a live account cannot impersonate. Complete one-to-one replacement still needs operator approvals, deeper subnode churn, and the remaining registry transitions before production deployment.
 
 ## Concrete validation
 
-The following checks passed on the proof-coupled source:
+The following checks passed on the aligned source on 2026-08-26:
 
 ```bash
 HYPERION_Z3_LIBRARY_DIR=/path/to/z3/lib npm run verify:formal
@@ -124,21 +124,23 @@ HYPERION_COMPILER=../hyperion/build/hypc/hypc npm test
 QNS_CONFIG=config/local-qip55.json QNS_PUBLIC_DEV_ACCOUNT=0 npm run deploy:testnet
 QNS_CONFIG=config/local-qip55.json QNS_PUBLIC_DEV_ACCOUNT=0 npm run register -- alice
 QNS_CONFIG=config/local-qip55.json npm run verify:pq
+QNS_BEHAVIOR=1 QNS_PUBLIC_DEV_ACCOUNT=0 npm run test:behavior
 ```
 
-The formal gate proved 36 CHC targets. Six contracts compiled normally and via IR. The local chain accepted all six deployments. `alice.qrl` passed forward resolution, reverse resolution, and forward confirmation. SHAKE256 known-vector, ML-DSA-87 valid, ML-DSA-87 invalid, wrapper parity, and exact digest-boundary checks all passed.
+The formal gate proved 36 CHC targets. Hyperion `0.2.0-develop.2026.8.25+commit.f55de24d.mod.Linux.g++` passed its complete 7,184-test suite, including both new builtin semantics. Six contracts compiled normally and via IR. QNS passed 17 deployment-script tests and 23 SDK tests. The local chain accepted all six deployments. A fresh `.qrl` name passed forward resolution, reverse resolution, and forward confirmation. The PQ verifier passed nine direct and wrapped phases covering the SHAKE256 vector, valid and invalid ML-DSA-87 calls, mutated digest and public key, context lengths 0 and 255, cross-context rejection, and the exact digest boundary. The live behavior suite passed all eight subtests. Both the active go-qrl integration tree and the retained snapshot tree passed `go test ./...` after their activated tracer expectations were reconciled.
 
-The Kurtosis evidence and deployment record remain available for independent review. The local enclave was stopped after validation to release host resources and must be recreated for another live run.
+The local composition used chain ID `3151908`, `qrl2PQPrecompilesTime: 0`, exact source and image labels, and loopback-only ephemeral Kurtosis mappings. Block height advanced from 96 to 98 during the final health probe. The deployment record remains local and ignored. The validated enclave and its stable RPC proxy were stopped after validation to release host resources; the stopped enclave record remains available for inspection.
 
 ## Residual protocol decisions
 
-- Select the fork activation rule for slots 3 and 6. A fresh genesis can activate them immediately; an existing network requires coordinated consensus activation.
-- Ratify the gas schedule using multiple supported validator CPU classes. The current local medians were about 323 ns for 64-byte SHAKE256 and 180 microseconds for ML-DSA-87 verification. The 250000 charge is conservative relative to the proposed SHAKE256 schedule on that host.
+- Select the activation rule for the existing slot 3 verifier and new slot 6 SHAKE256 operation. A fresh genesis can activate them immediately; an existing network requires coordinated consensus activation.
+- Select empty data or a canonical 64-byte zero word as the final verifier failure form. Hyperion is fail-closed for both candidates during review.
+- Ratify the gas schedule using multiple supported validator CPU classes. The current local medians were about 323 ns for 64-byte SHAKE256 and 180 microseconds for ML-DSA-87 verification. The expected verifier charge is 125000 unless proposal review approves another value.
 - Publish a serialized cross-language ML-DSA-87 vector with provenance.
 - Define the public-key-to-QRL-identity binding before signatures authorize QNS record writes.
 - Freeze the canonical signed-record encoding and treat any change to `QNS-SIGN-v1` as a protocol-version change.
 - Select a stable Hyperion release and repeat the proof with its supported Z3 version before public deployment.
 - Select the production governance owner, revoke the deployer's temporary Root controller role, and transfer Root plus ReverseRegistrar ownership through a separately reviewed handoff procedure.
-- Restore Hyperion-native lifecycle coverage for the 28 removed Foundry behavior tests before production deployment.
+- Complete Hyperion-native lifecycle coverage for the remaining cases from the 28 removed Foundry behavior tests before production deployment.
 
 The detailed review artifacts are in [`docs/security-review-2026-08-23-qrl2/`](./security-review-2026-08-23-qrl2/).

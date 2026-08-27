@@ -1,22 +1,22 @@
 ---
 qip:
 title: QRL 2.0 SHAKE256 and ML-DSA-87 verification precompiles
-author: <confirm community authors before submission>
+author: DigitalGuards (@DigitalGuards)
 layer: core/security
 status: draft/incomplete
 comments_uri:
 comments_summary_uri:
 created: 2026-08-22
-updated: 2026-08-23
+updated: 2026-08-26
 ---
 
 ## Abstract
 
-This QIP adds two deterministic native operations to the QRL 2.0 execution layer. Precompile address `0x03` computes SHAKE256 with a fixed 64-byte output from arbitrary input. Precompile address `0x06` verifies an ML-DSA-87 signature over a fixed 64-byte message representative with an explicit FIPS 204 context string. The verifier receives the signature and public key because ML-DSA has no public-key recovery operation equivalent to `ecrecover`.
+This QIP standardizes the existing ML-DSA-87 verification precompile at address `0x03` and adds SHAKE256 with a fixed 64-byte output at address `0x06`. The verifier operates over a fixed 64-byte message representative with an explicit FIPS 204 context string. It receives the signature and public key because ML-DSA has no public-key recovery operation equivalent to `ecrecover`.
 
-Both operations use raw packed input and canonical 64-byte output values that match the QRL 2.0 virtual machine word size. Invalid or malformed verification input returns false. Out-of-gas behavior follows the normal precompile call path. The proposal also reserves Hyperion global builtins named `shake256` and `mldsa87verify` so contract authors can call the operations without hand-building static calls.
+SHAKE256 returns one 64-byte QRL 2.0 virtual-machine word. Successful ML-DSA-87 verification returns the canonical 64-byte word ending in `0x01`. The current go-qrl implementation returns empty data for invalid or malformed verification, following an `ecrecover`-style convention. The QRL implementation lead has confirmed that empty data versus a canonical boolean remains open before release. Out-of-gas behavior follows the normal precompile call path. The proposal also specifies Hyperion global builtins named `shake256` and `mldsa87verify` so contract authors can call the operations without hand-building static calls. During review, Hyperion maps both candidate failure forms to `false` and accepts only the exact success word as `true`.
 
-The initial implementation targets unused precompile slots in go-qrl, includes compiler support in Hyperion, and is exercised by QNS contract and SDK groundwork on a fresh-genesis local network. Fork activation, the final ML-DSA gas price, and publication of a compact interoperable verification vector remain review items before this draft advances.
+The reference implementation adds a named QRL 2.0 post-quantum precompile rule to go-qrl. At activation it changes the slot `0x03` message representative from the legacy 32-byte frame to the ratified 64-byte frame and adds SHAKE256 at the confirmed unused slot `0x06`. Fresh QRL 2.0 networks activate the rule at genesis. Hyperion compiler support, QNS contract and SDK consumers, explicit artifact target metadata, and a predeployment live-network probe share the same slot map. The aligned end-to-end composition passed on 2026-08-26. Final gas ratification and publication of a compact interoperable verification vector remain review items before this draft advances.
 
 ## Motivation
 
@@ -28,14 +28,14 @@ SHAKE256 is used throughout the QRL cryptographic stack and provides a fixed-wid
 
 ### Addresses and activation
 
-The following QRL execution addresses become precompiled contracts at a fork block selected during proposal review:
+This proposal covers two precompiled contracts at the following QRL execution addresses:
 
 | Slot | Operation |
 | --- | --- |
-| `0x03` | SHAKE256 with a 64-byte output |
-| `0x06` | ML-DSA-87 detached signature verification |
+| `0x03` | ML-DSA-87 detached signature verification |
+| `0x06` | SHAKE256 with a 64-byte output |
 
-The addresses are encoded as native 64-byte QRL addresses with the slot number in the least significant byte. Clients MUST keep the new behavior behind the agreed fork activation rule.
+The addresses are encoded as native 64-byte QRL addresses with the slot number in the least significant byte. Before this rule activates, slot `0x03` retains the legacy 32-byte message-representative frame and slot `0x06` has no precompile behavior. At activation, slot `0x03` uses the 64-byte frame specified here and slot `0x06` provides SHAKE256. Both operations are active from genesis on the next QRL 2.0 testnet, as confirmed by the QRL implementation lead on 2026-08-25. A network that already has blocks under the earlier map MUST schedule the same rule at a coordinated timestamp.
 
 ### SHAKE256 precompile
 
@@ -56,26 +56,33 @@ The verifier accepts one raw byte string with this exact layout:
 | Field | Length |
 | --- | ---: |
 | `messageRepresentative` | 64 bytes |
-| `signature` | 4627 bytes |
 | `publicKey` | 2592 bytes |
+| `signature` | 4627 bytes |
+| `contextLength` | 1 byte |
 | `context` | 0 to 255 bytes |
 
-The fixed portion is 7283 bytes. Total valid input length is 7283 to 7538 bytes inclusive. Field boundaries are determined only by the fixed lengths above. There are no length prefixes.
+The fixed portion is 7284 bytes. Total valid input length is 7284 to 7539 bytes inclusive. `contextLength` is an unsigned byte and MUST equal the number of trailing context bytes. Any missing, excess, or inconsistent byte makes the input malformed.
 
 Verification invokes the FIPS 204 ML-DSA-87 verification operation with `context` as the context string, `messageRepresentative` as the message, `signature` as the detached signature, and `publicKey` as the public key.
 
-The return value is always exactly 64 bytes after successful precompile execution:
+Success return data is fixed:
 
 - Valid signature: 63 zero bytes followed by `0x01`.
-- Invalid signature or malformed input: 64 zero bytes.
+
+Failure return data remains a proposal decision between:
+
+- Current implementation: empty return data.
+- Canonical boolean alternative: 64 zero bytes.
+
+Consensus implementations MUST select one failure form before release and apply it identically to invalid signatures and malformed input. Callers written during the review period should treat either candidate failure form as false and reject every other noncanonical value.
 
 Malformed input includes any length outside the allowed range. The verifier MUST NOT recover, derive, or return an account address. Applications MUST define and enforce their own binding between the supplied ML-DSA public key and an identity, account, or authorization record.
 
-Required gas is 250000 for every input. This value is provisional until cross-platform benchmarks and denial-of-service review are complete. A call with less than the required gas fails with the execution layer's normal out-of-gas result and returns no value.
+Required gas is 125000 for every input, matching the current go-qrl implementation. This value remains open to adjustment through proposal review if cross-platform benchmarks or denial-of-service analysis justify a change. A call with less than the required gas fails with the execution layer's normal out-of-gas result and returns no value.
 
 ### Hyperion builtins
 
-Hyperion exposes these pure global functions when compiling for a fork that supports the precompiles:
+The QRL 2.0 Hyperion build exposes these pure global functions:
 
 ```hyperion
 function shake256(bytes memory input) pure returns (bytes64)
@@ -87,7 +94,7 @@ function mldsa87verify(
 ) pure returns (bool)
 ```
 
-The compiler packs builtin arguments into the raw layouts defined above and issues a static call to the corresponding precompile. The compiler requests a 64-byte return value for both operations.
+The compiler packs verifier arguments as `messageRepresentative || publicKey || signature || uint8(context.length) || context` and issues a static call to `0x03`. It rejects component lengths outside the specified bounds through a malformed precompile call, which preserves the fixed precompile gas charge. Empty return data and the canonical 64-byte zero word map to `false` during protocol review. Only exactly 64 returned bytes whose value is one map to `true`; other noncanonical return data maps to `false`. SHAKE256 issues a static call to `0x06`, requires exactly 64 returned bytes, and reverts on missing, short, or oversized successful return data.
 
 ### Test vectors
 
@@ -103,11 +110,11 @@ SHAKE256("abc", 64)
 d5a15bef186a5386c75744c0527e1faa9f8726e462a12a4feb06bd8801e751e4
 ```
 
-The reference test suite generates an ML-DSA-87 key from a deterministic 32-byte seed, signs a 64-byte message representative with a context, verifies the result, and then mutates each input field to confirm failure. A complete serialized vector and its provenance MUST be attached before this draft advances to proposal status.
+The reference go-qrl suite carries a reproducible ML-DSA-87 vector in `core/vm/testdata/precompiles/mldsa87_verify.json`, regenerated by `TestMLDSA87VerifyVectorProvenance`: seed = 32 bytes of `0x51`, `messageRepresentative` = `SHAKE256("QNS local integration vector", 64)` = `8b4452b0...96f4a5ed`, context = `QNS-SIGN-v1`, deterministic (non-hedged) FIPS 204 signing. The valid entry MUST return the success word; the mutated-digest and wrong-context entries MUST fail. The suite also mutates each input field of a fresh keypair to confirm failure. The full serialized vector is attached to the proposal-status submission.
 
 ## Rationale
 
-Slots `0x03` and `0x06` are available in the current QRL execution registry. Existing operations occupy `0x01`, `0x02`, `0x04`, and `0x05`.
+The current QRL execution registry assigns ML-DSA-87 verification to `0x03`. Slot `0x06` is unused and is assigned to SHAKE256. Existing operations occupy `0x01`, `0x02`, `0x04`, and `0x05`.
 
 A fixed 64-byte SHAKE256 output matches `bytes64` and one QRL 2.0 virtual machine word. A separate SHAKE256 operation is useful beyond signature verification and avoids coupling message hashing to one application protocol.
 
@@ -115,19 +122,19 @@ The verifier uses a fixed 64-byte message representative to make the packed layo
 
 The context remains caller supplied because FIPS 204 context strings provide protocol domain separation. The 255-byte bound follows the ML-DSA interface. Applications should select a stable, non-empty context and treat changes as a signing-protocol version change.
 
-Returning false for invalid material gives contracts a predictable verification primitive. Execution failure remains reserved for insufficient gas or an internal consensus implementation failure.
+The current empty-data failure behavior follows a familiar `ecrecover`-style convention. A canonical zero word gives direct low-level callers a fixed-width boolean and avoids special return-size handling. The Hyperion builtin provides a stable boolean interface across both candidates by accepting only the canonical success word as true. Execution failure remains reserved for insufficient gas or an internal consensus implementation failure.
 
 Alternatives considered include a new opcode, contract-level cryptographic code, arbitrary-length signed messages, and a verifier that derives a QRL address. Precompiles fit the existing execution architecture. Fixed field lengths remove parser ambiguity. Identity binding remains an application decision because multiple address and key registration schemes can consume the same verifier.
 
 ## Backward compatibility
 
-This proposal changes calls to native addresses `0x03` and `0x06`. Before activation, those addresses have no precompile behavior. Contracts that deliberately call either empty address could observe different success, gas, and return-data behavior after activation.
+The pre-activation go-qrl map assigns the legacy 32-byte ML-DSA-87 frame to native address `0x03`. This proposal changes that interface to 64 bytes at the same activation boundary that adds SHAKE256 behavior at the currently unused address `0x06`. Networks can observe different success, gas, and return-data behavior after activation.
 
-The change therefore requires coordinated execution-client activation at a fork boundary. The current implementation is suitable only for a fresh-genesis network where every participant runs the same registry. Hyperion compiler releases that emit these calls must identify the minimum compatible network revision. Contracts compiled with these builtins must not be deployed to an older network.
+The next QRL 2.0 testnet activates both operations from genesis, so every participant runs the same registry from block one. Any network with earlier blocks requires coordinated execution-client activation at a timestamp boundary. Review artifacts identify the `qrl2-pq-v1` target, compiler binary hash, source-tree hash, and artifact hashes. The QNS deployment path requires that target in network configuration and executes live slot `0x03` plus `0x06` probes before its first transaction.
 
-The go-qrl tracer fixture demonstrates that activation is observable beyond return data. With slots `0x03` and `0x06` active, the reconciled case reports three subtraces and `0x4d205` gas; its pre-activation form reported six subtraces and `0x1131d` gas. Mixed clients can therefore diverge in execution and tracing as soon as either address is called.
+The go-qrl tracer fixtures demonstrate that precompile activation is observable beyond return data. The existing `0x03` verifier changes tracing, and the activated `0x06` SHAKE256 call changes the inner-call gas and return values. The reconciled activated fixtures passed both focused tracer tests and `go test ./...`. Mixed clients can diverge in execution and tracing as soon as either address is called.
 
-No existing precompile address or ABI is modified. Existing contract bytecode that does not call the two reserved addresses retains its behavior.
+The standardized `0x03` interface preserves the current implementation's address, raw layout, and gas charge. Its failure return convention remains a release decision and may affect direct low-level callers. Existing contract bytecode that does not call `0x03` or `0x06` retains its behavior.
 
 ## Reference Implementation
 
@@ -138,9 +145,11 @@ The review implementation consists of:
 - QNS Hyperion contract and TypeScript SDK examples using `QNS-SIGN-v1`.
 - A Kurtosis configuration for a local 64-byte QRL 2.0 network.
 
-The local composition pins `cyyber/qrysm@b53fd7c4` and `theQRL/qrl-genesis-generator@6a11fbce` because the published Qrysm images inspected during validation predated the 64-byte changes. The source-built execution, beacon, and validator services produced blocks. Six QNS contracts deployed, native 64-byte forward and reverse resolution passed, and direct plus wrapped valid and invalid cryptographic calls passed.
+The reviewed go-qrl base declares `github.com/theQRL/go-qrllib v0.8.0` and currently resolves it through a `replace` directive to `github.com/rgeraldes24/go-qrllib v0.1.1-0.20260707094212-a6d78f111b1f`. The replacement module declares the official module path. The reviewed module checksum is `h1:yhR6S+o8Fz2DZojtOAvyORd8msr+vyehEmZjDrxvVw8=` and its `go.mod` checksum is `h1:cJalbgwzfscRXz7gqwPmmeC2wxB/QJh631N1dpihXuI=`. Consensus release provenance must name the actually resolved commit and either move to an audited official release containing that code or explicitly ratify the replacement before activation.
 
-Hyperion's CHC engine, backed by Z3 4.12.1, proved 36 source-coupled QNS security targets. These cover exact digest-boundary dispatch, every byte and index bound of `QNS-SIGN-v1`, deterministic formal calls, resolver capability predicates, unauthorized transition models, and reverse-index arithmetic. The proof gate rejects unsafe, unproved, unavailable, unsupported, missing, or unexpected targets. Hyperion models the cryptographic operations as deterministic uninterpreted functions, so concrete cryptographic security remains grounded in the pinned implementations and differential vectors.
+The aligned local composition pinned `cyyber/qrysm@b53fd7c4` and `theQRL/qrl-genesis-generator@6a11fbce` because the published Qrysm images inspected during validation predated the 64-byte changes. A tracked generator patch set `qrl2PQPrecompilesTime: 0`. On 2026-08-26 the network produced blocks, deployed six QNS contracts, exercised native 64-byte forward and reverse resolution, passed all nine direct and wrapped PQ phases, and passed eight live lifecycle and authorization subtests. Every observed Kurtosis service mapping used a loopback host address. The enclave and stable RPC proxy were stopped after validation.
+
+On the aligned compiler, Hyperion's CHC engine, backed by Z3 4.12.1, proved 36 source-coupled QNS security targets. These cover exact digest-boundary dispatch, every byte and index bound of `QNS-SIGN-v1`, deterministic formal calls, resolver capability predicates, unauthorized transition models, and reverse-index arithmetic. The proof gate rejects unsafe, unproved, unavailable, unsupported, missing, or unexpected targets. Hyperion models the cryptographic operations as deterministic uninterpreted functions, so concrete cryptographic security remains grounded in the resolved implementations and differential vectors. The complete Hyperion suite reported 7,184 passing tests on the same review tree.
 
 Public branch and commit links accompany the community review. Submission will pin the final reviewed commits.
 
@@ -154,15 +163,20 @@ Hashing and signing must agree exactly. A protocol that signs raw messages while
 
 Consensus clients must pin an audited ML-DSA-87 implementation and validate that arbitrary fixed-length signatures and public keys cannot panic, allocate without bounds, or produce platform-dependent results. Differential vectors should cover valid signatures, each mutated field, empty and maximum contexts, malformed lengths, and out-of-gas execution.
 
-Gas pricing must cover worst-case verification cost on supported validator hardware with a conservative margin. The fixed charge prevents malformed inputs from receiving a discount, but the proposed value remains subject to benchmark review. Five local runs measured medians near 323 ns for SHAKE256 over 64 bytes and 180 microseconds for ML-DSA-87 verification. The proposed 250000 verifier charge is conservative relative to the proposed SHAKE256 schedule on that host; cross-platform validator measurements are still required.
+Dependency declarations must identify the code that consensus builds actually resolve. A module version paired with a fork replacement can obscure the reviewed source if release notes mention only the declared version. Build manifests and QIP evidence should record the resolved module path, pseudoversion, commit, and checksum.
+
+Gas pricing must cover worst-case verification cost on supported validator hardware with a conservative margin. The fixed charge prevents malformed inputs from receiving a discount, but the current value remains subject to benchmark review. Five local runs measured medians near 323 ns for SHAKE256 over 64 bytes and 180 microseconds for ML-DSA-87 verification. At 125000 gas, a 30 million gas block permits at most 240 verifications, approximately 43 milliseconds at that measured median before scheduling and execution overhead. Cross-platform validator measurements and worst-case distributions are still required.
 
 SHAKE256 gas calculation must resist integer overflow. Both precompiles must return newly owned or immutable output buffers so concurrent execution cannot corrupt results.
 
 ## Open review items
 
-1. Confirm the author list and champion.
-2. Select the fork activation rule.
-3. Ratify or adjust the 250000 gas charge using cross-platform benchmark data.
+1. Confirm the champion and any additional co-authors before submission.
+2. Resolved on 2026-08-25: go-qrl gates the 64-byte slot `0x03` frame and slot `0x06` behind one timestamp rule. The next QRL 2.0 testnet sets that timestamp to zero in genesis. Existing networks can assign a later coordinated timestamp.
+3. Ratify or adjust the current 125000 gas charge using cross-platform benchmark data.
 4. Attach a complete ML-DSA-87 serialized interoperability vector with provenance.
 5. Confirm whether the core API should call the first field `messageRepresentative`, `digest`, or another consensus term.
-6. Confirm compiler behavior when targeting a pre-activation network revision.
+6. Resolved for the review implementation on 2026-08-25: compiler artifacts declare the `qrl2-pq-v1` target and exact compiler/source/artifact hashes. QNS deployment requires that configured target and probes both precompiles before any transaction. A future general-purpose Hyperion release can expose explicit multi-fork target selection if it must emit bytecode for older networks.
+7. Select empty return data or the canonical 64-byte zero word for invalid and malformed verification.
+8. Publish the exact go-qrllib module and checksum used by consensus builds. The QRL implementation lead confirmed on 2026-08-24 that the replacement at commit `a6d78f111b1f` is a temporary testing dependency and that all replacements are updated before the new testnet.
+9. Resolved on 2026-08-25: the QRL implementation lead ratified the 64-byte message-representative width. The reference go-qrl implementation, this draft, the Hyperion builtin, and the QNS consumer all read a 64-byte field with a fixed portion of 7284 bytes. The previously deployed verifier read a 32-byte field (`common.HashLength`, fixed portion 7252) and changes with the next testnet release; pre-release callers of `0x03` MUST NOT assume the 32-byte frame.

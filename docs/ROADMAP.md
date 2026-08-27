@@ -1,6 +1,6 @@
 # QNS roadmap
 
-Updated 2026-08-23.
+Updated 2026-08-26.
 
 ## QRL 2.0 foundation
 
@@ -9,10 +9,11 @@ Updated 2026-08-23.
 - [x] Convert QNS contract sources to Hyperion only.
 - [x] Add SHAKE256 and ML-DSA verifier compiler/runtime groundwork.
 - [x] Update SDK ABI encoding and address decoding for 64-byte words.
-- [ ] Complete full repository validation.
+- [x] Complete full repository validation for the aligned go-qrl, Hyperion, and QNS review trees.
 - [x] Run the end-to-end deployment on a local Kurtosis network.
 - [x] Verify forward and reverse resolution through the TypeScript SDK.
-- [x] Verify direct and wrapped SHAKE256 and ML-DSA-87 calls.
+- [x] Verify direct and wrapped SHAKE256 and ML-DSA-87 calls on the activated slot 3 and slot 6 composition, including invalid and mutated inputs, context boundaries, cross-context rejection, and the exact 64-byte digest boundary.
+- [x] Run the live Hyperion registry lifecycle and authorization suite with two funded development accounts.
 
 ## Signed records
 
@@ -34,7 +35,7 @@ Updated 2026-08-23.
 ## Governance and deployment
 
 - [ ] Community review of the precompile QIP draft.
-- [ ] Core-team review of slots, gas, and activation.
+- [ ] Core-team review of slots and gas. Genesis activation is implemented for the next testnet.
 - [ ] QIP submission after reviewer approval.
 - [ ] Fresh deployment on the public 64-byte testnet.
 - [ ] Wallet and explorer integration.

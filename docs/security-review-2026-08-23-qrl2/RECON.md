@@ -1,5 +1,7 @@
 # Recon and threat model
 
+Update 2026-08-24: ML-DSA-87 is assigned to slot 3 with `digest || publicKey || signature || contextLength || context`; SHAKE256 is assigned to slot 6. The failure return convention remains open between empty data and a canonical zero word.
+
 ## Scope
 
 - go-qrl slots 3 and 6, gas calculation, raw input parsing, output encoding, and registration
@@ -25,6 +27,7 @@
 - JavaScript SDK to contract ABI
 - local deployment scripts to wallet material
 - execution client to Qrysm through the Engine API
+- go-qrl module declaration to the source selected by its replacement directive
 
 ## Attacker capabilities
 
@@ -34,10 +37,11 @@ The attacker controls all call data and all public function parameters. The atta
 
 - new precompile behavior activates only under the agreed consensus rule
 - SHAKE256 returns exactly 64 deterministic bytes with overflow-safe gas calculation
-- ML-DSA-87 accepts only the specified packed length range and returns a canonical 64-byte boolean word
+- ML-DSA-87 accepts only the specified packed frame; Hyperion maps empty data and a canonical zero word to false and accepts only the canonical success word as true
 - QNS verification applies the exact 64-byte boundary and the versioned context
 - supplied public keys gain no identity authority without a separate binding rule
 - resolver owner-only records change only for the current node owner
 - trusted reverse registrar capability reaches `setName` only
 - reverse labels consume all 64 address bytes as 128 lowercase hexadecimal characters
 - local public fixtures are selected only for the exact loopback-URL development chain, while host bind scope is verified independently before enclave use
+- consensus builds resolve the reviewed go-qrllib commit and checksum

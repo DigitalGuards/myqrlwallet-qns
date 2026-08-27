@@ -15,7 +15,7 @@ Move QNS from the legacy 20-byte Testnet V2 deployment to a Hyperion-only QRL 2.
 
 ## Runtime migration
 
-1. Add SHAKE256 and ML-DSA-87 verification to go-qrl at proposal slots 3 and 6.
+1. Standardize the existing ML-DSA-87 verifier interface at slot 3 and add SHAKE256 at slot 6.
 2. Add typed builtins and both legacy and via-IR code generation to Hyperion.
 3. Validate raw input packing, 64-byte output handling, gas charging, malformed input, and out-of-gas behavior.
 4. Run the full Go suite and Hyperion semantic tests.

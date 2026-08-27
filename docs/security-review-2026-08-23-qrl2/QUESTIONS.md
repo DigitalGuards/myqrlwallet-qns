@@ -1,8 +1,8 @@
 # Questions for QIP and implementation review
 
-1. Should slots 3 and 6 activate at a fresh QRL 2.0 genesis or at a named execution fork?
-2. Are slots 3 and 6 reserved across every maintained client and network configuration?
-3. Which validator CPU classes, percentile, and safety margin define the final 250000 ML-DSA-87 gas charge?
+1. Should the existing slot 3 verifier and new slot 6 SHAKE256 operation activate at a fresh QRL 2.0 genesis or at a named execution fork?
+2. Should invalid and malformed ML-DSA-87 verification return empty data or a canonical 64-byte zero word?
+3. Which validator CPU classes, percentile, and safety margin define the final 125000 ML-DSA-87 gas charge?
 4. Should the first verifier field be named `messageRepresentative`, `digest`, or another consensus term?
 5. Is pure ML-DSA-87 over a 64-byte SHAKE256 application digest the intended construction for QNS? The draft correctly avoids the distinct HashML-DSA label.
 6. Which serialized cross-language vector and provenance will become normative?
@@ -14,3 +14,4 @@
 12. Which independent reviewers should be listed as QIP authors, champion, and implementation reviewers?
 13. Which production governance address should receive Root and ReverseRegistrar ownership, and when should the deployer's temporary Root controller role be revoked?
 14. Which Hyperion-native harness should restore the 28 removed registry lifecycle tests before production?
+15. Will the target consensus release use an official go-qrllib release containing commit `a6d78f111b1f`, or explicitly ratify the current fork replacement and checksum?
