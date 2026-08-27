@@ -36,15 +36,17 @@ export function encodeMLDSA87VerifyInput(
   }
 
   const input = new Uint8Array(
-    digest.length + signature.length + publicKey.length + context.length,
+    digest.length + publicKey.length + signature.length + 1 + context.length,
   );
   let offset = 0;
   input.set(digest, offset);
   offset += digest.length;
-  input.set(signature, offset);
-  offset += signature.length;
   input.set(publicKey, offset);
   offset += publicKey.length;
+  input.set(signature, offset);
+  offset += signature.length;
+  input[offset] = context.length;
+  offset += 1;
   input.set(context, offset);
   return input;
 }

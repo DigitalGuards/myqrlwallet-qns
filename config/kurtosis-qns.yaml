@@ -26,7 +26,7 @@ qrl_genesis_generator_params:
 port_publisher:
   nat_exit_ip: "127.0.0.1"
   el:
-    enabled: true
+    enabled: false
     public_port_start: 32000
   cl:
     enabled: false

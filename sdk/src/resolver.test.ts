@@ -64,6 +64,32 @@ describe("QNS resolver provider compatibility", () => {
     );
   });
 
+  it("rejects non-hex and odd-length qrl_call responses", async () => {
+    for (const response of ["0xgg", "0x0", "0x12zz"]) {
+      const provider: RpcProvider = {
+        async request() {
+          return response;
+        },
+      };
+      await expect(
+        getResolver("alice.qrl", { registry: REGISTRY, provider }),
+      ).rejects.toThrow("unexpected qrl_call result");
+    }
+  });
+
+  it("rejects short and oversized ABI address words", async () => {
+    for (const response of [`0x${"1".repeat(126)}`, `0x${"1".repeat(130)}`]) {
+      const provider: RpcProvider = {
+        async request() {
+          return response;
+        },
+      };
+      await expect(
+        getResolver("alice.qrl", { registry: REGISTRY, provider }),
+      ).rejects.toThrow("invalid ABI address return length");
+    }
+  });
+
   it("resolves a native 64-byte address from 64-byte ABI words", async () => {
     let call = 0;
     const provider: RpcProvider = {

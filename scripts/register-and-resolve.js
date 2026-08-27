@@ -31,8 +31,9 @@ function loadAbi(contractName) {
     return loadJson(path.join(artifactsDir, `${contractName}.abi`));
 }
 
-// Per ../QuantaPool/CLAUDE.md: contracts constructed via `new web3.qrl.Contract(abi, addr)`
-// do not inherit the wallet. Use encodeABI + qrl.sendTransaction instead.
+// QRL web3 contracts constructed via `new web3.qrl.Contract(abi, addr)` do not
+// inherit the wallet. Use encodeABI + qrl.sendTransaction instead (the
+// QuantaPool deployment pattern, GPL-3.0).
 async function sendTx(web3, contract, method, account, label) {
     const data = method.encodeABI();
     const gas = await method.estimateGas({ from: account.address });
@@ -71,16 +72,45 @@ function makeSdkProvider(web3) {
 }
 
 async function main() {
-    const nameLabel = process.argv[2] || "alice";
+    const requestedLabel = process.argv[2] || "alice";
+    const forwardOnlyValue = process.env.QNS_FORWARD_ONLY || "0";
+    if (forwardOnlyValue !== "0" && forwardOnlyValue !== "1") {
+        throw new Error("QNS_FORWARD_ONLY must be 0 or 1");
+    }
+    const forwardOnly = forwardOnlyValue === "1";
+
+    // Load and apply the same normalization implementation used by SDK reads
+    // before deriving a labelhash or submitting any transaction.
+    const sdk = await import(pathToFileURL(path.join(sdkDistDir, "index.js")).href);
 
     const config = loadJson(configPath);
-    const registryAddress = config.contracts?.QNSRegistry ?? config.contracts?.ENSRegistry;
+    const nameLabel = sdk.normalize(requestedLabel);
+    const tld = sdk.normalize(config.tld);
+    if (nameLabel.includes(".")) {
+        throw new Error(`registration label must contain one label, got "${requestedLabel}"`);
+    }
+    if (tld.includes(".")) {
+        throw new Error(`configured TLD must contain one label, got "${config.tld}"`);
+    }
+    const fullName = sdk.normalize(`${nameLabel}.${tld}`);
+
+    const registryAddress = config.contracts?.QNSRegistry;
     if (!registryAddress) {
         throw new Error(`${configPath} is missing contracts. Run deploy:testnet first.`);
     }
+    for (const contractName of ["FIFSQRLRegistrar", "QRLPublicResolver"]) {
+        if (!config.contracts?.[contractName]) {
+            throw new Error(`${configPath} is missing ${contractName}`);
+        }
+    }
+    if (!forwardOnly && !config.contracts?.ReverseRegistrar) {
+        throw new Error(
+            `${configPath} is missing ReverseRegistrar; set QNS_FORWARD_ONLY=1 to run an explicit forward-only check`
+        );
+    }
 
     console.log("=".repeat(60));
-    console.log(`QNS integration test: ${nameLabel}.${config.tld}`);
+    console.log(`QNS integration test: ${fullName}`);
     console.log("=".repeat(60));
     console.log(`Provider:   ${config.rpcUrl}`);
     console.log(`Registry:   ${registryAddress}`);
@@ -111,7 +141,7 @@ async function main() {
         loadAbi("QRLPublicResolver"),
         config.contracts.QRLPublicResolver
     );
-    const reverseRegistrar = config.contracts.ReverseRegistrar
+    const reverseRegistrar = !forwardOnly && config.contracts.ReverseRegistrar
         ? new web3.qrl.Contract(
               loadAbi("ReverseRegistrar"),
               config.contracts.ReverseRegistrar
@@ -122,13 +152,13 @@ async function main() {
     const ROOT = "0x" + "00".repeat(32);
     const labelHash = web3.utils.keccak256(nameLabel);
     const tldNode = web3.utils.keccak256(
-        ROOT + web3.utils.keccak256(config.tld).slice(2)
+        ROOT + web3.utils.keccak256(tld).slice(2)
     );
     const node = web3.utils.keccak256(
         tldNode + labelHash.slice(2)
     );
     console.log(`\nlabelhash(${nameLabel}) = ${labelHash}`);
-    console.log(`namehash(${nameLabel}.${config.tld}) = ${node}`);
+    console.log(`namehash(${fullName}) = ${node}`);
 
     // ------------------------------------------------------------
     // 1. Register alice.qrl (idempotent: skip if already owned by us)
@@ -146,6 +176,12 @@ async function main() {
             fifs.methods.register(labelHash, account.address),
             account,
             "fifs.register"
+        );
+    }
+    const ownerAfterRegistration = await registry.methods.owner(node).call();
+    if (ownerAfterRegistration.toLowerCase() !== account.address.toLowerCase()) {
+        throw new Error(
+            `registration ownership mismatch: got ${ownerAfterRegistration}, expected ${account.address}`
         );
     }
 
@@ -187,7 +223,6 @@ async function main() {
     // ------------------------------------------------------------
     // 4. Reverse: set deployer's addr.reverse primary name to this name
     // ------------------------------------------------------------
-    const fullName = `${nameLabel}.${config.tld}`;
     if (reverseRegistrar) {
         console.log("\n[4/6] reverseRegistrar.setName");
         const reverseNode = await reverseRegistrar.methods.node(account.address).call();
@@ -205,14 +240,13 @@ async function main() {
             );
         }
     } else {
-        console.log("\n[4/6] reverse: ReverseRegistrar not in config, skipping");
+        console.log("\n[4/6] reverse: skipped by explicit QNS_FORWARD_ONLY=1");
     }
 
     // ------------------------------------------------------------
     // 5. Forward resolve via @qns/sdk
     // ------------------------------------------------------------
     console.log("\n[5/6] SDK forward resolve");
-    const sdk = await import(pathToFileURL(path.join(sdkDistDir, "index.js")).href);
     const provider = makeSdkProvider(web3);
     const cfg = { registry: registryAddress, provider };
 
@@ -228,7 +262,7 @@ async function main() {
 
     const resolvedAddress = await sdk.resolveName(fullName, cfg);
     if (resolvedAddress === null) {
-        console.log("  resolveName: null");
+        throw new Error(`resolveName returned null for ${fullName}`);
     } else {
         console.log(`  resolveName:     ${resolvedAddress}`);
         if (resolvedAddress.toLowerCase() !== wantAddr) {
@@ -258,11 +292,15 @@ async function main() {
             );
         }
     } else {
-        console.log("\n[6/6] SDK reverse resolve: skipped (no ReverseRegistrar deployed)");
+        console.log("\n[6/6] SDK reverse resolve: skipped by explicit QNS_FORWARD_ONLY=1");
     }
 
     console.log("\n" + "=".repeat(60));
-    console.log(`OK: ${fullName} resolves end-to-end (forward + reverse + forward-confirm).`);
+    if (reverseRegistrar) {
+        console.log(`OK: ${fullName} resolves end-to-end (forward + reverse + forward-confirm).`);
+    } else {
+        console.log(`OK: ${fullName} passes the explicit forward-only resolution check.`);
+    }
     console.log("=".repeat(60));
 }
 

@@ -3,6 +3,7 @@
   "chainId": 3151908,
   "rpcUrl": "http://127.0.0.1:32002",
   "tld": "qrl",
+  "qrl2PrecompileSet": "qrl2-pq-v1",
   "contracts": {
     "QNSRegistry": null,
     "Root": null,

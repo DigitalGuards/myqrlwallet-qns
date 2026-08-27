@@ -1,10 +1,13 @@
 export { namehash, nodeToHex } from "./namehash.js";
+export { normalize, QnsNameError } from "./normalize.js";
 export {
   resolveName,
   resolveLegacyAddr,
   lookupAddress,
   verifyReverse,
   getResolver,
+  reverseNodeFor,
+  sha3HexAddress,
 } from "./resolver.js";
 export type { RpcProvider, QnsConfig } from "./resolver.js";
 export {

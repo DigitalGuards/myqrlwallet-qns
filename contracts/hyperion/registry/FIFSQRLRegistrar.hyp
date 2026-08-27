@@ -32,6 +32,11 @@ contract FIFSQRLRegistrar {
         baseNode = _baseNode;
     }
 
+    /// @notice Compatibility getter retained for ENS-derived integrations.
+    function ens() external view returns (IQNSRegistry) {
+        return qns;
+    }
+
     /// @notice Registers a subnode (label) under `baseNode` to `owner`.
     ///         Succeeds if the subnode is unassigned (owner == 0x0) or if the
     ///         existing owner is the caller (self-transfer).

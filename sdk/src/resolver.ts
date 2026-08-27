@@ -1,5 +1,6 @@
 import { keccak_256 } from "@noble/hashes/sha3";
 import { namehash, nodeToHex } from "./namehash.js";
+import { normalize, QnsNameError } from "./normalize.js";
 
 const utf8 = new TextEncoder();
 const ABI_WORD_BYTES = 64;
@@ -56,7 +57,7 @@ async function qrlCall(
     method: "qrl_call",
     params: [{ to, data }, "latest"],
   });
-  if (typeof result !== "string" || !result.startsWith("0x")) {
+  if (typeof result !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/.test(result)) {
     throw new Error(`unexpected qrl_call result: ${String(result)}`);
   }
   return result;
@@ -100,10 +101,15 @@ function decodeBytes(returnData: string): Uint8Array {
 }
 
 function decodeAddress(returnData: string): string {
-  if (returnData === "0x" || returnData.length < 2 + ADDRESS_HEX) {
+  if (returnData === "0x") {
     return "Q" + "0".repeat(ADDRESS_HEX);
   }
-  return "Q" + returnData.slice(-ADDRESS_HEX);
+  if (returnData.length !== 2 + ADDRESS_HEX) {
+    throw new Error(
+      `invalid ABI address return length: got ${(returnData.length - 2) / 2} bytes, expected 64`,
+    );
+  }
+  return "Q" + returnData.slice(2);
 }
 
 /// Decode an ABI-encoded `string` return value, using the same wire format as bytes.
@@ -136,7 +142,10 @@ function bytesToHex(bytes: Uint8Array): string {
 /// QRL 2.0 reverse label: keccak256 of the 128-char lowercase hex of a
 /// 64-byte address, with no
 /// `0x`/`Q` prefix. The ReverseRegistrar labels subnodes by this hash.
-function sha3HexAddress(addr: string): string {
+/// Consensus-visible: must stay synchronized with
+/// contracts/hyperion/reverse/QRLAddressReverse.hyp; the shared vector in
+/// fixtures/qns-vectors.json pins both sides.
+export function sha3HexAddress(addr: string): string {
   const hex = stripAddrPrefix(addr);
   if (hex.length !== ADDRESS_HEX || !/^[0-9a-f]+$/.test(hex)) {
     throw new Error(`expected 64-byte address hex, got "${addr}"`);
@@ -144,7 +153,8 @@ function sha3HexAddress(addr: string): string {
   return "0x" + bytesToHex(keccak_256(utf8.encode(hex)));
 }
 
-function reverseNodeFor(addr: string): string {
+/** Reverse node for a 64-byte address under `addr.reverse`. */
+export function reverseNodeFor(addr: string): string {
   const labelHash = sha3HexAddress(addr).slice(2);
   const concat = ADDR_REVERSE_NODE.slice(2) + labelHash;
   return "0x" + bytesToHex(keccak_256(hexToBytes(concat)));
@@ -158,7 +168,7 @@ export async function getResolver(
   name: string,
   config: QnsConfig,
 ): Promise<string | null> {
-  const node = nodeToHex(namehash(name));
+  const node = nodeToHex(namehash(normalize(name)));
   const data = SELECTOR_RESOLVER + bytes32Arg(node);
   const result = await qrlCall(config.provider, config.registry, data);
   const resolver = decodeAddress(result);
@@ -181,7 +191,7 @@ export async function resolveName(
   const resolver = await getResolver(name, config);
   if (!resolver) return null;
 
-  const node = nodeToHex(namehash(name));
+  const node = nodeToHex(namehash(normalize(name)));
   const data = SELECTOR_ADDR + bytes32Arg(node);
   const result = await qrlCall(config.provider, resolver, data);
   const addr = decodeAddress(result);
@@ -240,7 +250,14 @@ export async function verifyReverse(
 ): Promise<string | null> {
   const name = await lookupAddress(addr, config);
   if (!name) return null;
-  const forwardAddr = await resolveName(name, config);
+  let forwardAddr: string | null;
+  try {
+    forwardAddr = await resolveName(name, config);
+  } catch (err) {
+    // A stored reverse name that fails normalization cannot forward-confirm.
+    if (err instanceof QnsNameError) return null;
+    throw err;
+  }
   if (!forwardAddr) return null;
   const canonical = "q" + stripAddrPrefix(addr);
   return forwardAddr.toLowerCase() === canonical ? name : null;

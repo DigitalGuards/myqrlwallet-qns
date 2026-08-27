@@ -1,0 +1,14 @@
+diff --git a/apps/el-gen/genesis_gqrl.py b/apps/el-gen/genesis_gqrl.py
+index 8e6ac8c..c8ff1dd 100644
+--- a/apps/el-gen/genesis_gqrl.py
++++ b/apps/el-gen/genesis_gqrl.py
+@@ -24,7 +24,8 @@ if int(data['chain_id']) == 1:
+ else:
+     out = {
+         "config": {
+-            "chainId": int(data['chain_id'])
++            "chainId": int(data['chain_id']),
++            "qrl2PQPrecompilesTime": 0
+         },
+         "alloc": {
+             # Allocate 1 planck to all possible pre-compiles.

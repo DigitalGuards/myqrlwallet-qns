@@ -1,40 +1,50 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 package_dir="${QRL_PACKAGE_DIR:-${repo_root}/../qrl-package}"
 package_manifest="${package_dir}/kurtosis.yml"
 node_dir="${GO_QRL_DIR:-${repo_root}/../go-qrl}"
-enclave="${KURTOSIS_ENCLAVE:-qrl2-qns}"
+enclave="${KURTOSIS_ENCLAVE:-qrl2-qns-pq}"
 args_file="${repo_root}/config/kurtosis-qns.yaml"
 local_config="${repo_root}/config/local-qip55.json"
 rpc_url="http://127.0.0.1:32002"
 node_image="qrl2-qns/go-qrl:pq-precompiles"
 qrysm_commit="${QRYSM_COMMIT:-b53fd7c488f3f0d1d4163b270afac1749eed954b}"
 generator_commit="${QRL_GENESIS_GENERATOR_COMMIT:-6a11fbcee762af14d188507f071d08ac5782fa69}"
+generator_patch="${repo_root}/docker/qrysm/qrl-genesis-generator-qrl2-pq.patch"
 beacon_image="qrl2-qns/qrysm:beacon-chain-64"
 validator_image="qrl2-qns/qrysm:validator-64"
 generator_image="qrl2-qns/qrysm:qrl-genesis-generator-64"
 force_rebuild="${QNS_FORCE_REBUILD:-0}"
-allow_wildcard_bind="${QNS_ALLOW_WILDCARD_BIND:-0}"
+runtime_dir="${TMPDIR:-/tmp}/myqrlwallet-qns-${UID}/${enclave}"
+proxy_pid_file="${runtime_dir}/rpc-proxy.pid"
+proxy_log_file="${runtime_dir}/rpc-proxy.log"
+proxy_unit="myqrlwallet-qns-rpc-${enclave}.service"
+proxy_description="MyQRLWallet QNS RPC proxy for ${enclave}"
 
 command -v docker >/dev/null
 command -v git >/dev/null
 command -v kurtosis >/dev/null
+command -v sha256sum >/dev/null
+command -v socat >/dev/null
+
+if [[ ! "${enclave}" =~ ^[[:alnum:]][[:alnum:]_-]*$ ]]; then
+    echo "KURTOSIS_ENCLAVE must start with an alphanumeric character and contain only alphanumerics, underscores, or hyphens." >&2
+    exit 1
+fi
+
+if [[ ! -f "${generator_patch}" ]]; then
+    echo "QRL2 genesis-generator patch not found at ${generator_patch}" >&2
+    exit 1
+fi
+generator_patch_sha="$(sha256sum "${generator_patch}" | awk '{print $1}')"
 
 case "${force_rebuild}" in
     0|1) ;;
     *)
         echo "QNS_FORCE_REBUILD must be 0 or 1" >&2
-        exit 1
-        ;;
-esac
-
-case "${allow_wildcard_bind}" in
-    0|1) ;;
-    *)
-        echo "QNS_ALLOW_WILDCARD_BIND must be 0 or 1" >&2
         exit 1
         ;;
 esac
@@ -54,8 +64,26 @@ if [[ ! -f "${node_dir}/Dockerfile" ]]; then
     exit 1
 fi
 
+node_source_fingerprint() {
+    (
+        cd "${node_dir}"
+        while IFS= read -r -d '' source_file; do
+            printf '%s\0' "${source_file}"
+            if [[ -L "${source_file}" ]]; then
+                printf 'symlink\0%s\0' "$(readlink "${source_file}")"
+            elif [[ -f "${source_file}" ]]; then
+                printf 'file\0%s\0' "$(stat -c '%a' "${source_file}")"
+                printf '%s\0' "$(sha256sum -- "${source_file}" | awk '{print $1}')"
+            else
+                printf 'missing\0'
+            fi
+        done < <(git ls-files --cached --others --exclude-standard -z | LC_ALL=C sort -z)
+    ) | sha256sum | awk '{print $1}'
+}
+
 node_revision="$(git -C "${node_dir}" rev-parse HEAD)"
 node_source_state="clean"
+node_content_sha="$(node_source_fingerprint)"
 if [[ -n "$(git -C "${node_dir}" status --porcelain=v1 --untracked-files=all)" ]]; then
     node_source_state="dirty"
 fi
@@ -73,8 +101,8 @@ image_id() {
 
 node_image_is_current() {
     [[ "$(image_label "${node_image}" org.opencontainers.image.revision)" == "${node_revision}" ]] &&
-        [[ "$(image_label "${node_image}" org.opencontainers.image.source-state)" == "clean" ]] &&
-        [[ "${node_source_state}" == "clean" ]]
+        [[ "$(image_label "${node_image}" org.opencontainers.image.source-state)" == "${node_source_state}" ]] &&
+        [[ "$(image_label "${node_image}" org.qrl.qns.source-content-sha256)" == "${node_content_sha}" ]]
 }
 
 qrysm_image_is_current() {
@@ -83,13 +111,15 @@ qrysm_image_is_current() {
     [[ "$(image_label "${image}" org.opencontainers.image.revision)" == "${revision}" ]]
 }
 
+generator_image_is_current() {
+    [[ "$(image_label "${generator_image}" org.opencontainers.image.revision)" == "${generator_commit}" ]] &&
+        [[ "$(image_label "${generator_image}" org.qrl.qns.source-patch-sha256)" == "${generator_patch_sha}" ]] &&
+        [[ "$(image_label "${generator_image}" org.qrl.qns.qrl2-pq-precompiles-time)" == "0" ]]
+}
+
 ensure_node_image() {
-    if [[ "${node_source_state}" == "dirty" ]]; then
-        echo "go-qrl has local changes. Commit or clean the intended source before starting a reusable enclave." >&2
-        exit 1
-    fi
     if [[ "${force_rebuild}" == "1" ]] || ! node_image_is_current; then
-        echo "Building go-qrl image for ${node_revision}." >&2
+        echo "Building go-qrl image for ${node_revision} (${node_source_state}, ${node_content_sha})." >&2
         "${repo_root}/scripts/build-local-node-image.sh"
     fi
 }
@@ -98,71 +128,9 @@ ensure_qrysm_images() {
     if [[ "${force_rebuild}" == "1" ]] ||
         ! qrysm_image_is_current "${beacon_image}" "${qrysm_commit}" ||
         ! qrysm_image_is_current "${validator_image}" "${qrysm_commit}" ||
-        ! qrysm_image_is_current "${generator_image}" "${generator_commit}"; then
+        ! generator_image_is_current; then
         "${repo_root}/scripts/build-local-qrysm-images.sh"
     fi
-}
-
-is_wildcard_ip() {
-    [[ -z "$1" || "$1" == "0.0.0.0" || "$1" == "::" ]]
-}
-
-probe_default_bind_ips() {
-    local probe_name="qns-bind-probe-$$"
-    local probe_network="qns-bind-probe-net-$$"
-    local probe_container
-    local bind_ips
-
-    if ! docker network create --driver bridge "${probe_network}" >/dev/null; then
-        return 1
-    fi
-
-    if ! probe_container="$(docker run --detach --rm \
-        --name "${probe_name}" \
-        --network "${probe_network}" \
-        --entrypoint /bin/sh \
-        --publish 8545/tcp \
-        "${node_image}" \
-        -c 'sleep 30')"; then
-        docker network rm "${probe_network}" >/dev/null 2>&1 || true
-        return 1
-    fi
-
-    if ! bind_ips="$(docker inspect "${probe_container}" \
-        --format '{{range $port, $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{println .HostIp}}{{end}}{{end}}')"; then
-        docker rm --force "${probe_container}" >/dev/null 2>&1 || true
-        docker network rm "${probe_network}" >/dev/null 2>&1 || true
-        return 1
-    fi
-
-    docker rm --force "${probe_container}" >/dev/null
-    docker network rm "${probe_network}" >/dev/null
-    printf '%s\n' "${bind_ips}"
-}
-
-require_safe_default_bind() {
-    local bind_ips
-    local bind_ip
-
-    if [[ "${allow_wildcard_bind}" == "1" ]]; then
-        echo "WARNING: QNS_ALLOW_WILDCARD_BIND=1 permits Docker to publish QRL service ports on non-loopback interfaces." >&2
-        return
-    fi
-
-    if ! bind_ips="$(probe_default_bind_ips)" || [[ -z "${bind_ips}" ]]; then
-        echo "Could not prove Docker's default published-port bind address. Refusing to start." >&2
-        echo "Configure Docker for loopback publication or set QNS_ALLOW_WILDCARD_BIND=1 after applying host-level access controls." >&2
-        exit 1
-    fi
-
-    while IFS= read -r bind_ip; do
-        if is_wildcard_ip "${bind_ip}"; then
-            echo "Docker publishes unspecified ports on all host interfaces (${bind_ip:-unspecified}). Refusing to start." >&2
-            echo "The qrl-package nat_exit_ip value controls P2P advertisement and does not bind host ports." >&2
-            echo "Configure Docker for loopback publication or set QNS_ALLOW_WILDCARD_BIND=1 after applying host-level access controls." >&2
-            exit 1
-        fi
-    done <<< "${bind_ips}"
 }
 
 service_container_id() {
@@ -195,17 +163,13 @@ verify_running_service_image() {
 }
 
 verify_running_enclave_provenance() {
-    if [[ "${node_source_state}" != "clean" ]]; then
-        echo "go-qrl has local changes, so a running enclave cannot be matched to the current source." >&2
-        return 1
-    fi
     if ! node_image_is_current; then
-        echo "Local go-qrl image does not match clean source commit ${node_revision}." >&2
+        echo "Local go-qrl image does not match source commit ${node_revision} and content ${node_content_sha}." >&2
         return 1
     fi
     if ! qrysm_image_is_current "${beacon_image}" "${qrysm_commit}" ||
         ! qrysm_image_is_current "${validator_image}" "${qrysm_commit}" ||
-        ! qrysm_image_is_current "${generator_image}" "${generator_commit}"; then
+        ! generator_image_is_current; then
         echo "Local Qrysm images do not match the pinned source revisions." >&2
         return 1
     fi
@@ -217,35 +181,159 @@ verify_running_enclave_provenance() {
 
 verify_running_enclave_bindings() {
     local container_id
-    local bind_ips
-    local bind_ip
+    local container_name
+    local port_bindings
+    local port
+    local host_ip
+    local host_port
+    local -a container_ids
 
-    if [[ "${allow_wildcard_bind}" == "1" ]]; then
-        echo "WARNING: wildcard host publication was explicitly acknowledged." >&2
-        return
-    fi
-
-    container_id="$(service_container_id "el-1-gqrl-qrysm")"
-    if [[ -z "${container_id}" ]]; then
-        echo "Execution service container not found for bind verification." >&2
-        return 1
-    fi
-    bind_ips="$(docker inspect "${container_id}" \
-        --format '{{range $port, $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{println .HostIp}}{{end}}{{end}}')"
-    if [[ -z "${bind_ips}" ]]; then
-        echo "Execution service has no inspectable host port bindings." >&2
+    mapfile -t container_ids < <(
+        docker ps \
+            --filter "label=kurtosis_enclave_name=${enclave}" \
+            --format '{{.ID}}'
+    )
+    if [[ "${#container_ids[@]}" -eq 0 ]]; then
+        echo "No running service containers were found for bind verification." >&2
         return 1
     fi
 
-    while IFS= read -r bind_ip; do
-        if is_wildcard_ip "${bind_ip}"; then
-            echo "Execution service is published on all host interfaces (${bind_ip:-unspecified})." >&2
+    for container_id in "${container_ids[@]}"; do
+        container_name="$(docker inspect "${container_id}" --format '{{.Name}}')"
+        port_bindings="$(docker inspect "${container_id}" --format '{{json .NetworkSettings.Ports}}')"
+        while IFS=$'\t' read -r port host_ip host_port; do
+            [[ -n "${host_port}" ]] || continue
+            if [[ "${host_ip}" != "127.0.0.1" && "${host_ip}" != "::1" ]]; then
+                echo "Service ${container_name#/} has a non-loopback host binding for ${port}: ${host_ip}:${host_port}" >&2
+                echo "Observed Docker bindings: ${port_bindings}" >&2
+                return 1
+            fi
+        done < <(
+            docker inspect "${container_id}" \
+                --format '{{range $port, $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{printf "%s\t%s\t%s\n" $port .HostIp .HostPort}}{{end}}{{end}}'
+        )
+    done
+}
+
+proxy_systemd_is_current() {
+    local description
+    local exec_start
+    local destination_ip="$1"
+    command -v systemctl >/dev/null || return 1
+    systemctl --user is-active --quiet "${proxy_unit}" || return 1
+    description="$(systemctl --user show "${proxy_unit}" --property=Description --value 2>/dev/null || true)"
+    exec_start="$(systemctl --user show "${proxy_unit}" --property=ExecStart --value 2>/dev/null || true)"
+    [[ "${description}" == "${proxy_description}" ]] &&
+        [[ "${exec_start}" == *"TCP-LISTEN:32002,bind=127.0.0.1"* ]] &&
+        [[ "${exec_start}" == *"TCP:${destination_ip}:8545"* ]]
+}
+
+proxy_pid_is_current() {
+    local pid
+    local command_line
+    local destination_ip="$1"
+    [[ -f "${proxy_pid_file}" ]] || return 1
+    pid="$(<"${proxy_pid_file}")"
+    [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "${pid}" 2>/dev/null || return 1
+    command_line="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+    [[ "${command_line}" == *"TCP-LISTEN:32002,bind=127.0.0.1"* ]] &&
+        [[ "${command_line}" == *"TCP:${destination_ip}:8545"* ]]
+}
+
+stop_rpc_proxy() {
+    local pid
+    local command_line
+    local description
+
+    if command -v systemctl >/dev/null && systemctl --user cat "${proxy_unit}" >/dev/null 2>&1; then
+        description="$(systemctl --user show "${proxy_unit}" --property=Description --value 2>/dev/null || true)"
+        if [[ "${description}" != "${proxy_description}" ]]; then
+            echo "Refusing to stop ${proxy_unit}: its description does not identify the QNS RPC proxy." >&2
             return 1
         fi
-    done <<< "${bind_ips}"
+        systemctl --user stop "${proxy_unit}"
+        systemctl --user reset-failed "${proxy_unit}" >/dev/null 2>&1 || true
+    fi
+
+    [[ -f "${proxy_pid_file}" ]] || return 0
+    pid="$(<"${proxy_pid_file}")"
+    if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+        command_line="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+        if [[ "${command_line}" == *"TCP-LISTEN:32002,bind=127.0.0.1"* ]]; then
+            kill "${pid}"
+            for _ in {1..50}; do
+                if ! kill -0 "${pid}" 2>/dev/null; then
+                    break
+                fi
+                sleep 0.1
+            done
+            if kill -0 "${pid}" 2>/dev/null; then
+                echo "The QNS RPC proxy PID ${pid} did not stop." >&2
+                return 1
+            fi
+        else
+            echo "Refusing to stop PID ${pid}: it is not the QNS RPC proxy." >&2
+            return 1
+        fi
+    fi
+    rm -f -- "${proxy_pid_file}"
+}
+
+start_rpc_proxy() {
+    local container_id
+    local destination_ip
+    local proxy_pid
+    local socat_bin
+    container_id="$(service_container_id "el-1-gqrl-qrysm")"
+    destination_ip="$(docker inspect "${container_id}" \
+        --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+    if [[ -z "${destination_ip}" ]]; then
+        echo "Execution service has no Docker network address for the RPC proxy." >&2
+        return 1
+    fi
+    if proxy_systemd_is_current "${destination_ip}" || proxy_pid_is_current "${destination_ip}"; then
+        return 0
+    fi
+    stop_rpc_proxy
+    mkdir -p -- "${runtime_dir}"
+    chmod 700 "${runtime_dir}"
+    socat_bin="$(command -v socat)"
+
+    if command -v systemd-run >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
+        systemd-run --user --quiet --collect \
+            --unit="${proxy_unit}" \
+            --description="${proxy_description}" \
+            --property=Restart=on-failure \
+            --property=RestartSec=1s \
+            -- "${socat_bin}" \
+            "TCP-LISTEN:32002,bind=127.0.0.1,reuseaddr,fork" \
+            "TCP:${destination_ip}:8545"
+        for _ in {1..50}; do
+            if proxy_systemd_is_current "${destination_ip}"; then
+                return 0
+            fi
+            sleep 0.1
+        done
+        echo "The systemd-managed loopback RPC proxy failed to start." >&2
+        systemctl --user status "${proxy_unit}" --no-pager >&2 || true
+        return 1
+    fi
+
+    nohup setsid "${socat_bin}" \
+        "TCP-LISTEN:32002,bind=127.0.0.1,reuseaddr,fork" \
+        "TCP:${destination_ip}:8545" \
+        </dev/null >>"${proxy_log_file}" 2>&1 &
+    proxy_pid=$!
+    printf '%s\n' "${proxy_pid}" > "${proxy_pid_file}"
+    if ! proxy_pid_is_current "${destination_ip}"; then
+        echo "The loopback RPC proxy failed to start. See ${proxy_log_file}" >&2
+        return 1
+    fi
 }
 
 finish_start() {
+    start_rpc_proxy
     node "${repo_root}/scripts/wait-for-rpc.js" "${rpc_url}" 3151908
 
     if [[ ! -f "${local_config}" ]]; then
@@ -277,8 +365,17 @@ if enclave_inspect="$(kurtosis enclave inspect "${enclave}" 2>/dev/null)"; then
 fi
 
 ensure_node_image
-require_safe_default_bind
 ensure_qrysm_images
+
+cleanup_new_enclave_on_error() {
+    local status=$?
+    trap - ERR
+    stop_rpc_proxy || true
+    kurtosis enclave stop "${enclave}" >/dev/null 2>&1 || true
+    echo "Stopped the new enclave ${enclave} after a startup failure." >&2
+    exit "${status}"
+}
+trap cleanup_new_enclave_on_error ERR
 
 kurtosis run --enclave "${enclave}" "${package_manifest}" --args-file "${args_file}"
 
@@ -289,3 +386,4 @@ if ! verify_running_enclave_provenance || ! verify_running_enclave_bindings; the
 fi
 
 finish_start
+trap - ERR

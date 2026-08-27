@@ -12,19 +12,33 @@ const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { Web3 } = require("@theqrl/web3");
+const {
+    sha256File,
+    validateDeploymentTarget,
+    verifyArtifactManifest,
+} = require("./lib/hyperionArtifacts");
 const { loadDeployerFromEnvironment } = require("./lib/loadDeployer");
+const { assertQrl2PQPrecompileTarget } = require("./lib/qrl2Target");
 
 const repoRoot = path.join(__dirname, "..");
 const configPath = process.env.QNS_CONFIG
     ? path.resolve(repoRoot, process.env.QNS_CONFIG)
     : path.join(repoRoot, "config", "local-qip55.json");
 const hyperionArtifactsDir = path.join(repoRoot, "build", "hyperion");
+let verifiedArtifactManifest;
 
 function loadJson(p) {
     return JSON.parse(fs.readFileSync(p, "utf8"));
 }
 
 function loadHyperionArtifact(contractName) {
+    if (
+        !verifiedArtifactManifest?.contracts.some(
+            (entry) => entry.contractName === contractName
+        )
+    ) {
+        throw new Error(`Verified Hyperion manifest does not contain ${contractName}`);
+    }
     const abiPath = path.join(hyperionArtifactsDir, `${contractName}.abi`);
     const binPath = path.join(hyperionArtifactsDir, `${contractName}.bin`);
     if (!fs.existsSync(abiPath) || !fs.existsSync(binPath)) {
@@ -99,6 +113,11 @@ function subnode(parentNode, label, web3) {
 
 async function main() {
     const config = loadJson(configPath);
+    validateDeploymentTarget(config);
+    verifiedArtifactManifest = verifyArtifactManifest({
+        hyperionRoot: path.join(repoRoot, "contracts", "hyperion"),
+        artifactsDir: hyperionArtifactsDir,
+    });
 
     console.log("=".repeat(60));
     console.log("QNS Testnet Deployment");
@@ -106,7 +125,8 @@ async function main() {
     console.log(`Provider:        ${config.rpcUrl}`);
     console.log(`Expected chainId: ${config.chainId}`);
     console.log(`TLD:             .${config.tld}`);
-    console.log("Build target:    hyperion");
+    console.log(`Build target:    hyperion (${verifiedArtifactManifest.target.name})`);
+    console.log(`Compiler:        ${verifiedArtifactManifest.compiler.version}`);
 
     const web3 = new Web3(config.rpcUrl);
     const chainId = await web3.qrl.getChainId();
@@ -116,6 +136,9 @@ async function main() {
             `chainId mismatch: expected ${config.chainId}, got ${chainId}`
         );
     }
+
+    await assertQrl2PQPrecompileTarget(web3);
+    console.log("QRL2 target:      slot 3 ML-DSA-87 and slot 6 SHAKE256 passed");
 
     const account = loadDeployerFromEnvironment(web3, {
         repoRoot,
@@ -250,6 +273,9 @@ async function main() {
     config.deployedAt = new Date().toISOString();
     config.deployer = account.address;
     config.buildTarget = "hyperion";
+    config.artifactManifestSha256 = sha256File(
+        path.join(hyperionArtifactsDir, "manifest.json")
+    );
 
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 

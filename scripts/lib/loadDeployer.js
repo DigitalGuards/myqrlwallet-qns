@@ -1,4 +1,4 @@
-// Copied from ../../QuantaPool/scripts/lib/loadDeployer.js (GPL-3.0).
+// Adapted from the QuantaPool deployer loader (GPL-3.0).
 // QRL 2.0 uses 34-word ML-DSA-87 mnemonics and 51-byte extended seeds.
 const fs = require("fs");
 const path = require("path");

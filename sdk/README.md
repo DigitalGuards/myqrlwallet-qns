@@ -33,7 +33,7 @@ Any provider implementing `request({ method, params })` can be used. QNS sends r
 `qnsDigest()` computes a 64-byte SHAKE256 digest. `encodeMLDSA87VerifyInput()` creates the raw precompile payload:
 
 ```text
-digest[64] || signature[4627] || publicKey[2592] || context[0..255]
+digest[64] || publicKey[2592] || signature[4627] || contextLength[1] || context[0..255]
 ```
 
 The canonical QNS context is `QNS-SIGN-v1`.

@@ -28,10 +28,11 @@ describe("QNS ML-DSA helpers", () => {
     const input = encodeMLDSA87VerifyInput(digest, signature, publicKey, context);
 
     expect(new TextDecoder().decode(context)).toBe(QNS_MLDSA_CONTEXT);
-    expect(input.length).toBe(64 + 4627 + 2592 + context.length);
+    expect(input.length).toBe(64 + 2592 + 4627 + 1 + context.length);
     expect(input[0]).toBe(0x42);
-    expect(input[64]).toBe(0x43);
-    expect(input[64 + 4627]).toBe(0x44);
+    expect(input[64]).toBe(0x44);
+    expect(input[64 + 2592]).toBe(0x43);
+    expect(input[64 + 2592 + 4627]).toBe(context.length);
     expect(input.slice(-context.length)).toEqual(context);
   });
 
@@ -44,5 +45,53 @@ describe("QNS ML-DSA helpers", () => {
         qnsContext(),
       ),
     ).toThrow("digest must be 64 bytes");
+    expect(() =>
+      encodeMLDSA87VerifyInput(
+        new Uint8Array(MLDSA87_DIGEST_BYTES),
+        new Uint8Array(MLDSA87_SIGNATURE_BYTES - 1),
+        new Uint8Array(MLDSA87_PUBLIC_KEY_BYTES),
+        qnsContext(),
+      ),
+    ).toThrow("signature must be 4627 bytes");
+    expect(() =>
+      encodeMLDSA87VerifyInput(
+        new Uint8Array(MLDSA87_DIGEST_BYTES),
+        new Uint8Array(MLDSA87_SIGNATURE_BYTES),
+        new Uint8Array(MLDSA87_PUBLIC_KEY_BYTES + 1),
+        qnsContext(),
+      ),
+    ).toThrow("public key must be 2592 bytes");
+    expect(() =>
+      encodeMLDSA87VerifyInput(
+        new Uint8Array(MLDSA87_DIGEST_BYTES),
+        new Uint8Array(MLDSA87_SIGNATURE_BYTES),
+        new Uint8Array(MLDSA87_PUBLIC_KEY_BYTES),
+        new Uint8Array(256),
+      ),
+    ).toThrow("context must be at most 255 bytes");
+  });
+
+  it("accepts the context length boundaries", () => {
+    const digest = new Uint8Array(MLDSA87_DIGEST_BYTES);
+    const signature = new Uint8Array(MLDSA87_SIGNATURE_BYTES);
+    const publicKey = new Uint8Array(MLDSA87_PUBLIC_KEY_BYTES);
+
+    const empty = encodeMLDSA87VerifyInput(
+      digest,
+      signature,
+      publicKey,
+      new Uint8Array(0),
+    );
+    expect(empty.length).toBe(64 + 2592 + 4627 + 1);
+    expect(empty[empty.length - 1]).toBe(0);
+
+    const max = encodeMLDSA87VerifyInput(
+      digest,
+      signature,
+      publicKey,
+      new Uint8Array(255).fill(0x7a),
+    );
+    expect(max.length).toBe(64 + 2592 + 4627 + 1 + 255);
+    expect(max[64 + 2592 + 4627]).toBe(255);
   });
 });

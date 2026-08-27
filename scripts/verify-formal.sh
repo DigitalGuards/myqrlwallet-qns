@@ -64,6 +64,36 @@ run_proof() {
     trap - RETURN
 }
 
+# The CHC counts below are name-blind, so first require every named property
+# to exist in its file. This catches a deleted or renamed security property
+# being silently replaced by compiler-generated arithmetic targets.
+require_properties() {
+    local source="$1"
+    shift
+    local name
+    for name in "$@"; do
+        if ! rg -q "function ${name}\\(" "${repo_root}/${source}"; then
+            echo "Formal gate failed: ${source} is missing property ${name}." >&2
+            exit 1
+        fi
+    done
+}
+
+require_properties "test/formal/QNSSecurityProperties.hyp" \
+    proveMalformedDigestRejected \
+    proveExactDigestDispatch \
+    proveQNSContext \
+    proveCryptoDeterminism \
+    proveOwnerOnlyPolicy \
+    proveUnauthorizedOwnerOnlyTransition \
+    proveTrustedRegistrarScope \
+    proveTrustedRegistrarCannotMutateOwnerOnlyRecord
+
+require_properties "test/formal/QNSReverseSafetyProperties.hyp" \
+    provePairBounds \
+    provePairInjective \
+    proveNibbleBounds
+
 run_proof \
     "cryptographic boundary and resolver capabilities" \
     "test/formal/QNSSecurityProperties.hyp" \

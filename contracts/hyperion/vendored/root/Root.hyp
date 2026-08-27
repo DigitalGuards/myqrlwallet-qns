@@ -25,6 +25,11 @@ contract Root is Controllable {
         qns = _qns;
     }
 
+    /// @notice Compatibility getter retained for ENS-derived integrations.
+    function ens() external view returns (IQNSRegistry) {
+        return qns;
+    }
+
     function setSubnodeOwner(
         bytes32 label,
         address owner

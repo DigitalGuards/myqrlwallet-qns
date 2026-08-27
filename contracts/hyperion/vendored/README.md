@@ -6,10 +6,11 @@ This directory contains the Hyperion-native QNS copies of selected ENS v1 contra
 
 ```text
 repository: ensdomains/ens-contracts
-tag: v1.6.2
-commit: 3d477d4
+commit: 3d477d43959db296e227907a768dc0252fc4edc4
 date: 2025-12-08
 ```
+
+The commit is the upstream version bump titled "v1.6.2"; upstream publishes no `v1.6.2` git tag, so re-vendoring must check out the commit hash.
 
 The selected registry, resolver-profile, root, and reverse-registrar files retain their upstream MIT license. See `LICENSE` and `DIFFS.md`.
 
@@ -21,8 +22,8 @@ The selected registry, resolver-profile, root, and reverse-registrar files retai
 - `reverseRegistrar/`: basic transaction-sender reverse registration.
 - `openzeppelin/`: minimal Ownable and ERC-165 implementations used by this tree.
 
-QNS-specific contracts live outside `vendored/`. NameWrapper, auction registration, DNS, Universal Resolver, and CCIP Read are outside the current scope.
+QNS-specific contracts live outside `vendored/`, including the consensus-visible reverse-label encoder `contracts/hyperion/reverse/QRLAddressReverse.hyp` (QNS-authored, GPL-3.0; it has no upstream counterpart and must survive a re-vendor untouched). NameWrapper, auction registration, DNS, Universal Resolver, and CCIP Read are outside the current scope.
 
 ## Update policy
 
-Keep upstream-derived behavior stable, record every semantic change in `DIFFS.md`, and re-run the complete Hyperion contract build after changing the pin or compiler version.
+Keep upstream-derived behavior stable, record every semantic change in `DIFFS.md` (it claims completeness; an unlisted divergence is a defect), and re-run the complete Hyperion contract build after changing the pin or compiler version. Re-vendoring replaces only the upstream-derived files listed above.

@@ -5,7 +5,7 @@ import "../openzeppelin/access/Ownable.hyp";
 
 import "../registry/IQNSRegistry.hyp";
 import "./IReverseRegistrar.hyp";
-import "./QRLAddressReverse.hyp";
+import "../../reverse/QRLAddressReverse.hyp";
 import "../root/Controllable.hyp";
 
 abstract contract NameResolver {
@@ -37,6 +37,11 @@ contract ReverseRegistrar is Controllable, IReverseRegistrar {
         if (address(oldRegistrar) != address(0x0)) {
             oldRegistrar.claim(msg.sender);
         }
+    }
+
+    /// @notice Compatibility getter retained for ENS-derived integrations.
+    function ens() external view returns (IQNSRegistry) {
+        return qns;
     }
 
     modifier authorised(address addr) {

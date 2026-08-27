@@ -51,6 +51,11 @@ contract QRLPublicResolver is
         trustedReverseRegistrar = _trustedReverseRegistrar;
     }
 
+    /// @notice Compatibility getter retained for ENS-derived integrations.
+    function ens() external view returns (IQNSRegistry) {
+        return qns;
+    }
+
     /// @inheritdoc ResolverBase
     function isAuthorised(bytes32 node) internal view override returns (bool) {
         return QRLResolverAuthorization.canWrite(qns.owner(node), msg.sender);

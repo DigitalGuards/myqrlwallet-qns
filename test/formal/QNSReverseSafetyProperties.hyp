@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma hyperion >=0.0;
 
-import {QRLAddressReverse} from "../../contracts/hyperion/vendored/reverseRegistrar/QRLAddressReverse.hyp";
+import {QRLAddressReverse} from "../../contracts/hyperion/reverse/QRLAddressReverse.hyp";
 
 /// @notice Executable SMTChecker lemmas used by the native 64-byte reverse
 ///         encoder. The production loop calls these same helpers.
