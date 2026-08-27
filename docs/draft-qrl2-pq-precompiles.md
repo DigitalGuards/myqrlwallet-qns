@@ -1,28 +1,28 @@
 ---
 qip:
-title: QRL 2.0 SHAKE256 and ML-DSA-87 verification precompiles
+title: "QNS Cryptographic Foundation: SHAKE256 and ML-DSA-87 Precompiles"
 author: DigitalGuards (@DigitalGuards)
 layer: core/security
 status: draft/incomplete
 comments_uri:
 comments_summary_uri:
 created: 2026-08-22
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 ## Abstract
 
-This QIP standardizes the existing ML-DSA-87 verification precompile at address `0x03` and adds SHAKE256 with a fixed 64-byte output at address `0x06`. The verifier operates over a fixed 64-byte message representative with an explicit FIPS 204 context string. It receives the signature and public key because ML-DSA has no public-key recovery operation equivalent to `ecrecover`.
+This QIP defines the post-quantum contract primitives that form the cryptographic foundation of QRL Name Service (QNS) and remain reusable by other QRL protocols. It standardizes the existing ML-DSA-87 verification precompile at address `0x03` and adds SHAKE256 with a fixed 64-byte output at address `0x06`. The verifier operates over a fixed 64-byte message representative with an explicit FIPS 204 context string. It receives the signature and public key because ML-DSA has no public-key recovery operation equivalent to `ecrecover`.
 
 SHAKE256 returns one 64-byte QRL 2.0 virtual-machine word. Successful ML-DSA-87 verification returns the canonical 64-byte word ending in `0x01`. The current go-qrl implementation returns empty data for invalid or malformed verification, following an `ecrecover`-style convention. The QRL implementation lead has confirmed that empty data versus a canonical boolean remains open before release. Out-of-gas behavior follows the normal precompile call path. The proposal also specifies Hyperion global builtins named `shake256` and `mldsa87verify` so contract authors can call the operations without hand-building static calls. During review, Hyperion maps both candidate failure forms to `false` and accepts only the exact success word as `true`.
 
-The reference implementation adds a named QRL 2.0 post-quantum precompile rule to go-qrl. At activation it changes the slot `0x03` message representative from the legacy 32-byte frame to the ratified 64-byte frame and adds SHAKE256 at the confirmed unused slot `0x06`. Fresh QRL 2.0 networks activate the rule at genesis. Hyperion compiler support, QNS contract and SDK consumers, explicit artifact target metadata, and a predeployment live-network probe share the same slot map. The aligned end-to-end composition passed on 2026-08-26. Final gas ratification and publication of a compact interoperable verification vector remain review items before this draft advances.
+The reference implementation adds a named QRL 2.0 post-quantum precompile rule to go-qrl. At activation it changes the slot `0x03` message representative from the legacy 32-byte frame to the ratified 64-byte frame and adds SHAKE256 at the confirmed unused slot `0x06`. Fresh QRL 2.0 networks activate the rule at genesis. Hyperion compiler support, QNS contract and SDK consumers, explicit artifact target metadata, and a predeployment live-network probe share the same slot map. The aligned end-to-end composition passed on 2026-08-26. Final gas ratification remains a review item before this draft advances.
 
 ## Motivation
 
 QRL 2.0 contracts need a practical way to verify post-quantum authorization. The ECDSA `ecrecover` model recovers a public key or signer address from an elliptic-curve signature. ML-DSA verification requires the public key as an explicit input and returns only a validity result. Implementing ML-DSA-87 in contract bytecode would add substantial execution cost, code size, and consensus risk.
 
-SHAKE256 is used throughout the QRL cryptographic stack and provides a fixed-width message representative for contract protocols. A native 64-byte digest composes naturally with the QRL 2.0 64-byte word size and with ML-DSA-87 verification. QNS is an initial consumer for signed record operations, with the application-specific context `QNS-SIGN-v1`.
+SHAKE256 is used throughout the QRL cryptographic stack and provides a fixed-width message representative for contract protocols. A native 64-byte digest composes naturally with the QRL 2.0 64-byte word size and with ML-DSA-87 verification. QNS is the anchor consumer: signed naming records need post-quantum authorization, stable domain separation, and deterministic verification inside Hyperion contracts. The established wire context remains `QNS-SIGN-v1`, preserving the reviewed signed bytes.
 
 ## Specification
 
@@ -151,7 +151,17 @@ The aligned local composition pinned `cyyber/qrysm@b53fd7c4` and `theQRL/qrl-gen
 
 On the aligned compiler, Hyperion's CHC engine, backed by Z3 4.12.1, proved 36 source-coupled QNS security targets. These cover exact digest-boundary dispatch, every byte and index bound of `QNS-SIGN-v1`, deterministic formal calls, resolver capability predicates, unauthorized transition models, and reverse-index arithmetic. The proof gate rejects unsafe, unproved, unavailable, unsupported, missing, or unexpected targets. Hyperion models the cryptographic operations as deterministic uninterpreted functions, so concrete cryptographic security remains grounded in the resolved implementations and differential vectors. The complete Hyperion suite reported 7,184 passing tests on the same review tree.
 
-Public branch and commit links accompany the community review. Submission will pin the final reviewed commits.
+The initial community review is pinned to these public references:
+
+| Component | Reviewed source | Review thread |
+| --- | --- | --- |
+| go-qrl | [`39be3a8`](https://github.com/DigitalGuards/go-qrl/commit/39be3a83cb956adc9796ceee1783f97df3f7e2a5) | [cyyber/go-qrl#191](https://github.com/cyyber/go-qrl/pull/191) |
+| Hyperion | [`6f862206`](https://github.com/DigitalGuards/hyperion/commit/6f862206ff34bce56098cc23b4b3f575e0ea3c5f) | [cyyber/hyperion#18](https://github.com/cyyber/hyperion/pull/18) |
+| QNS contracts, SDK, vectors, and composition | [`e20a25f`](https://github.com/DigitalGuards/myqrlwallet-qns/commit/e20a25fca84d3eb5299ec80c5f154b60224183e4) | [DigitalGuards/myqrlwallet-qns#4](https://github.com/DigitalGuards/myqrlwallet-qns/pull/4) |
+| Qrysm beacon and validator | [`b53fd7c4`](https://github.com/cyyber/qrysm/commit/b53fd7c488f3f0d1d4163b270afac1749eed954b) | Source pin |
+| Genesis generator | [`6a11fbce`](https://github.com/theQRL/qrl-genesis-generator/commit/6a11fbcee762af14d188507f071d08ac5782fa69) plus [activation patch](https://github.com/DigitalGuards/myqrlwallet-qns/blob/e20a25fca84d3eb5299ec80c5f154b60224183e4/docker/qrysm/qrl-genesis-generator-qrl2-pq.patch) | Source pin |
+
+The deterministic serialized ML-DSA-87 interoperability vector is published with [the QNS SDK fixtures](https://github.com/DigitalGuards/myqrlwallet-qns/blob/e20a25fca84d3eb5299ec80c5f154b60224183e4/sdk/src/fixtures/qns-vectors.json).
 
 ## Security Considerations
 
@@ -171,10 +181,10 @@ SHAKE256 gas calculation must resist integer overflow. Both precompiles must ret
 
 ## Open review items
 
-1. Confirm the champion and any additional co-authors before submission.
+1. Resolved on 2026-08-27: DigitalGuards is the initial author and champion. Additional co-authors can be added during QRL team review.
 2. Resolved on 2026-08-25: go-qrl gates the 64-byte slot `0x03` frame and slot `0x06` behind one timestamp rule. The next QRL 2.0 testnet sets that timestamp to zero in genesis. Existing networks can assign a later coordinated timestamp.
 3. Ratify or adjust the current 125000 gas charge using cross-platform benchmark data.
-4. Attach a complete ML-DSA-87 serialized interoperability vector with provenance.
+4. Resolved on 2026-08-27: the reference table links the complete deterministic ML-DSA-87 serialized interoperability vector and its source provenance.
 5. Confirm whether the core API should call the first field `messageRepresentative`, `digest`, or another consensus term.
 6. Resolved for the review implementation on 2026-08-25: compiler artifacts declare the `qrl2-pq-v1` target and exact compiler/source/artifact hashes. QNS deployment requires that configured target and probes both precompiles before any transaction. A future general-purpose Hyperion release can expose explicit multi-fork target selection if it must emit bytecode for older networks.
 7. Select empty return data or the canonical 64-byte zero word for invalid and malformed verification.
