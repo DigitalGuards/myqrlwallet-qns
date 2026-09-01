@@ -1,86 +1,48 @@
 # @qns/sdk
 
-TypeScript client SDK for the QRL Name Service. Forward/reverse resolution against a QNS registry deployed on QRL Zond.
+TypeScript helpers for QNS on QRL 2.0.
 
-> **Status:** forward + reverse resolution live on Testnet V2 (chainId 1337) via Hyperion-compiled contracts. See the repo root [config/testnet.json](../config/testnet.json) for addresses.
+## Address and ABI model
 
-## Install
-
-```bash
-npm install @qns/sdk
-```
-
-### Provider
-
-`@qns/sdk` accepts providers with an EIP-1193-style `request({method, params})` API and QRL's `qrl_call` RPC method. The recommended browser/mobile provider is [`@qrlwallet/connect`](https://github.com/DigitalGuards/myqrlwallet-connect) v2 through v4. It opens a post-quantum (ML-KEM-768) encrypted session from a dApp to the MyQRLWallet mobile app via QR code or deep link.
-
-```bash
-npm install @qrlwallet/connect
-```
-
-For signed records (Phase 4), also install:
-
-```bash
-npm install @theqrl/mldsa87
-```
+- Native addresses are `Q` followed by 128 hex characters.
+- `resolveName()` and `resolveLegacyAddr()` return the same native address string.
+- Reverse labels hash the 128 lowercase address hex characters without a prefix.
+- Contract calls use `qrl_call` and 64-byte ABI words.
+- `bytes32` namehash arguments are left-aligned and zero-padded to 64 bytes.
 
 ## Usage
 
 ```ts
-import { QRLConnect } from "@qrlwallet/connect";
-import { resolveName, lookupAddress, namehash } from "@qns/sdk";
+import { lookupAddress, qnsDigest, resolveName, verifyReverse } from "@qns/sdk";
 
-const provider = new QRLConnect({
-  dappMetadata: { name: "My dApp", url: "https://example.com" },
-  autoReconnect: true,
-});
-const uri = await provider.getConnectionURI();
-// ... present the URI as a QR code or deep link to the user.
-
-const cfg = {
-  registry: "Qd812032246Fc1e53f5eC392c325b1B4A8C0C2f92", // from config/testnet.json
+const config = {
+  registry: "Q" + "1".repeat(128),
   provider,
 };
 
-// Forward: alice.qrl -> 24-byte QRL address bytes
-const addrBytes = await resolveName("alice.qrl", cfg);
-
-// Reverse: 20-byte EVM address -> primary name
-const name = await lookupAddress("Q2E13b52fd3cda0a57f9037856B7Df971074e2489", cfg);
-
-// Client-side namehash (EIP-137)
-const node = namehash("alice.qrl");
+const address = await resolveName("alice.qrl", config);
+const name = address ? await lookupAddress(address, config) : null;
+const verifiedName = address ? await verifyReverse(address, config) : null;
+const digest = qnsDigest(new TextEncoder().encode("record payload"));
 ```
 
-## What's implemented
+Any provider implementing `request({ method, params })` can be used. QNS sends reads through the QRL `qrl_call` method.
 
-| API | Status |
-|---|---|
-| `namehash(name) -> Uint8Array` | Working (keccak256 via `@noble/hashes`) |
-| `nodeToHex(node) -> 0x...` | Working |
-| `getResolver(name, cfg) -> string \| null` | Working (live on testnet) |
-| `resolveName(name, cfg) -> Uint8Array \| null` | Working; returns 24-byte QRL wallet-display form |
-| `resolveLegacyAddr(name, cfg) -> string \| null` | Working; returns 20-byte EVM address |
-| `lookupAddress(addr, cfg) -> string \| null` | Working; ENSIP-19 reverse via `addr.reverse` |
-| `verifyReverse(addr, cfg) -> string \| null` | Working; `lookupAddress` + forward-confirm |
+## ML-DSA helpers
 
-## Normalization
+`qnsDigest()` computes a 64-byte SHAKE256 digest. `encodeMLDSA87VerifyInput()` creates the raw precompile payload:
 
-This SDK assumes labels are **already normalized** per [ENSIP-15](https://docs.ens.domains/ensip/15). Use [`@adraffy/ens-normalize`](https://github.com/adraffy/ens-normalize.js) on untrusted input *before* calling `namehash`.
+```text
+digest[64] || publicKey[2592] || signature[4627] || contextLength[1] || context[0..255]
+```
 
-## Address format notes
-
-- **20-byte EVM form** (`Q...40hex` or `0x...40hex`) is what `msg.sender` resolves to on-chain and what you pass to `lookupAddress` / `resolveLegacyAddr`.
-- **24-byte QRL wallet-display form** is returned by `resolveName` (the primary forward record). Per `docs/ADDRESS-COMPATIBILITY.md` (Path A), we store it as `bytes` via the `IQRLAddrResolver` profile so tooling can recover the full wallet representation.
+The canonical QNS context is `QNS-SIGN-v1`.
 
 ## Development
 
 ```bash
 npm install
-npm run build
+npm run typecheck
 npm test
+npm run build
 ```
-
-## License
-
-GPL-3.0. See `../LICENSE`.

@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+import {QRLSignatureVerifier} from "../../contracts/hyperion/crypto/QRLSignatureVerifier.hyp";
+import {QRLResolverAuthorization} from "../../contracts/hyperion/resolvers/QRLResolverAuthorization.hyp";
+
+/// @notice Executable SMTChecker properties for the QNS cryptographic boundary,
+///         and resolver capability policy.
+contract QNSSecurityProperties is QRLSignatureVerifier {
+    function proveMalformedDigestRejected(
+        bytes memory messageDigest,
+        bytes memory signature,
+        bytes memory publicKey,
+        bytes memory context
+    ) public pure {
+        require(messageDigest.length != 64);
+        assert(!verifyDigest(messageDigest, signature, publicKey, context));
+    }
+
+    function proveExactDigestDispatch(
+        bytes memory messageDigest,
+        bytes memory signature,
+        bytes memory publicKey,
+        bytes memory context
+    ) public pure {
+        require(messageDigest.length == 64);
+        assert(
+            verifyDigest(messageDigest, signature, publicKey, context) ==
+                mldsa87verify(
+                    bytes64(messageDigest),
+                    signature,
+                    publicKey,
+                    context
+                )
+        );
+    }
+
+    function proveQNSContext() public pure {
+        bytes memory context = qnsContext();
+        assert(context.length == 11);
+        assert(
+            context[0] == 0x51 &&
+                context[1] == 0x4e &&
+                context[2] == 0x53 &&
+                context[3] == 0x2d &&
+                context[4] == 0x53 &&
+                context[5] == 0x49 &&
+                context[6] == 0x47 &&
+                context[7] == 0x4e &&
+                context[8] == 0x2d &&
+                context[9] == 0x76 &&
+                context[10] == 0x31
+        );
+    }
+
+    function proveCryptoDeterminism(
+        bytes memory message,
+        bytes64 messageDigest,
+        bytes memory signature,
+        bytes memory publicKey,
+        bytes memory context
+    ) public pure {
+        assert(shake256(message) == shake256(message));
+        assert(
+            mldsa87verify(messageDigest, signature, publicKey, context) ==
+                mldsa87verify(messageDigest, signature, publicKey, context)
+        );
+    }
+
+    function proveOwnerOnlyPolicy(
+        address nodeOwner,
+        address caller
+    ) public pure {
+        bool allowed = QRLResolverAuthorization.canWrite(nodeOwner, caller);
+        assert(allowed == (nodeOwner == caller));
+        if (caller != nodeOwner) {
+            assert(!allowed);
+        }
+    }
+
+    function proveUnauthorizedOwnerOnlyTransition(
+        address nodeOwner,
+        address caller,
+        bytes32 currentValue,
+        bytes32 attemptedValue
+    ) public pure {
+        bytes32 nextValue = currentValue;
+        if (QRLResolverAuthorization.canWrite(nodeOwner, caller)) {
+            nextValue = attemptedValue;
+        }
+        if (caller != nodeOwner) {
+            assert(nextValue == currentValue);
+        }
+    }
+
+    function proveTrustedRegistrarScope(
+        address nodeOwner,
+        address caller,
+        address trustedReverseRegistrar
+    ) public pure {
+        bool ownerWrite = QRLResolverAuthorization.canWrite(
+            nodeOwner,
+            caller
+        );
+        bool nameWrite = QRLResolverAuthorization.canSetName(
+            nodeOwner,
+            caller,
+            trustedReverseRegistrar
+        );
+
+        assert(
+            nameWrite ==
+                (caller == nodeOwner ||
+                    (trustedReverseRegistrar != address(0) &&
+                        caller == trustedReverseRegistrar))
+        );
+        if (nameWrite && !ownerWrite) {
+            assert(trustedReverseRegistrar != address(0));
+            assert(caller == trustedReverseRegistrar);
+        }
+        if (
+            trustedReverseRegistrar != address(0) &&
+            caller == trustedReverseRegistrar &&
+            caller != nodeOwner
+        ) {
+            assert(nameWrite);
+            assert(!ownerWrite);
+        }
+    }
+
+    function proveTrustedRegistrarCannotMutateOwnerOnlyRecord(
+        address nodeOwner,
+        address trustedReverseRegistrar,
+        bytes32 currentValue,
+        bytes32 attemptedValue
+    ) public pure {
+        require(
+            trustedReverseRegistrar != address(0) &&
+                trustedReverseRegistrar != nodeOwner
+        );
+        bytes32 nextValue = currentValue;
+        if (
+            QRLResolverAuthorization.canWrite(
+                nodeOwner,
+                trustedReverseRegistrar
+            )
+        ) {
+            nextValue = attemptedValue;
+        }
+
+        assert(nextValue == currentValue);
+    }
+
+}

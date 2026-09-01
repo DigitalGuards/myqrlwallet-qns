@@ -12,8 +12,9 @@ function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
 }
 
 /**
- * EIP-137 namehash. Labels must already be normalized per ENSIP-15. Call
- * `normalize()` on untrusted input before passing labels here. Empty string
+ * EIP-137 namehash. Labels must already be normalized. Call `normalize()`
+ * (exported by this SDK; conservative ASCII profile, a strict subset of
+ * ENSIP-15) on untrusted input before passing labels here. Empty string
  * returns the 32-byte zero root node.
  */
 export function namehash(name: string): Uint8Array {

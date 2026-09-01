@@ -1,8 +1,7 @@
-// Generated from contracts/solidity/vendored/root/Root.sol by scripts/sync-hyperion.js.
-// Edit the Solidity source, then re-run this script.
+// SPDX-License-Identifier: MIT
 pragma hyperion >=0.0;
 
-import "../registry/ENS.hyp";
+import "../registry/IQNSRegistry.hyp";
 import "./Controllable.hyp";
 
 // QNS DIFF vs ensdomains/ens-contracts@v1.6.2:
@@ -19,11 +18,16 @@ contract Root is Controllable {
 
     event TLDLocked(bytes32 indexed label);
 
-    ENS public ens;
+    IQNSRegistry public qns;
     mapping(bytes32 => bool) public locked;
 
-    constructor(ENS _ens) {
-        ens = _ens;
+    constructor(IQNSRegistry _qns) {
+        qns = _qns;
+    }
+
+    /// @notice Compatibility getter retained for ENS-derived integrations.
+    function ens() external view returns (IQNSRegistry) {
+        return qns;
     }
 
     function setSubnodeOwner(
@@ -31,11 +35,11 @@ contract Root is Controllable {
         address owner
     ) external onlyController {
         require(!locked[label]);
-        ens.setSubnodeOwner(ROOT_NODE, label, owner);
+        qns.setSubnodeOwner(ROOT_NODE, label, owner);
     }
 
     function setResolver(address resolver) external onlyOwner {
-        ens.setResolver(ROOT_NODE, resolver);
+        qns.setResolver(ROOT_NODE, resolver);
     }
 
     function lock(bytes32 label) external onlyOwner {

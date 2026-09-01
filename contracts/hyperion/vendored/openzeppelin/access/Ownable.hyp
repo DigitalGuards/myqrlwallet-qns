@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: MIT
-// Generated from contracts/solidity/vendored/openzeppelin/access/Ownable.sol by scripts/sync-hyperion.js.
-// Edit the Solidity source, then re-run this script.
 // Minimal OpenZeppelin v5-compatible Ownable for QNS. No Context dep.
 // Matches the subset of the OZ interface we use: constructor(initialOwner),
 // onlyOwner modifier, owner() view, transferOwnership, renounceOwnership.

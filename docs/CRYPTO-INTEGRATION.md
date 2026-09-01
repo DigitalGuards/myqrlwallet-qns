@@ -1,120 +1,61 @@
-# Crypto Integration: ML-DSA-87 for Signed Records
+# SHAKE256 and ML-DSA-87 integration
 
-Status as of 2026-04-21: Phase 4 scoped; implementation pending precompile docs drop (2026-04-28).
+Status: aligned implementation and validation evidence as of 2026-08-26. The slot map, raw framing, Hyperion lowering, SDK helpers, formal gate, and live composition have all been exercised on the current tree.
 
-## Scope
+## Execution interfaces
 
-**Inside the EVM** nothing changes. keccak256 is available on Hyperion/QRVM; ownership in ENS/QNS core paths (registry, resolver writes) is enforced by `msg.sender`, verified at consensus using ML-DSA-87 transaction signatures. No `ecrecover` appears in Phase 1/2/3 code paths — which is good because **`ecrecover` is removed on Zond** ("ECDSA has NO place" per QRL dev Cyyber).
+This development branch standardizes the existing ML-DSA-87 precompile interface, adds SHAKE256, and supplies matching Hyperion builtins:
 
-**Off-chain** there are three signing surfaces inherited from ENS that Phase 4 reimplements against ML-DSA-87:
+| Slot | Hyperion builtin | Input | Output | Gas |
+|---|---|---|---|---|
+| 3 | `mldsa87verify(bytes64,bytes,bytes,bytes)` | packed fields below | canonical true; failure form under review | `125000` |
+| 6 | `shake256(bytes)` | arbitrary bytes | 64-byte SHAKE256 digest | `240 + 48 * ceil(len / 64)` |
 
-1. **ENSIP-19 signature-based reverse** (`setNameForAddrWithSignature`, selector `0x2023a04c`): user signs a message, contract verifies. Upstream uses `ecrecover`.
-2. **EIP-5559 / ERC-7700 off-chain writes**: client signs record update, gateway relays.
-3. **CCIP-Read (EIP-3668)**: resolver reverts with `OffchainLookup`, client fetches signed gateway response.
+The QRL implementation lead confirmed ML-DSA-87 at slot 3, SHAKE256 at slot 6, and 125000 as the expected verifier gas charge unless proposal review approves another value. Empty return data versus a canonical false word remains open before release.
 
-All three replace `ecrecover(65-byte secp256k1)` with `ML-DSA-87 precompile(4627-byte sig, 2592-byte pk)`.
+## ML-DSA raw input
 
-## Library (client-side)
+The VM precompile receives raw concatenation with no ABI framing:
 
-- [`@theqrl/mldsa87`](https://www.npmjs.com/package/@theqrl/mldsa87) v1.1.1.
-- Code-frozen 2026-02-13. Halborn-audited 2026-03-31 — all 13 informational findings resolved.
-- Commit `58db119` + remediation commits `1661eca`, `f9fb304`, `2c4335b`, `201e2e3`.
-
-### API shape
-
-```ts
-import { cryptoSignSignature, cryptoSignVerify } from "@theqrl/mldsa87";
-
-const ctx = "ZOND/QNS/v1"; // domain separator — prevents cross-protocol replay
-
-const sig = cryptoSignSignature(
-  new Uint8Array(4627),   // signature buffer (output)
-  message,                // bytes to sign
-  secretKey,              // 4,896 bytes
-  true,                   // randomized signing
-  ctx,
-);
-
-const ok = cryptoSignVerify(sig, message, publicKey, ctx);
+```text
+digest[64] || publicKey[2592] || signature[4627] || contextLength[1] || context[0..255]
 ```
 
-- Signature: **4,627 bytes**.
-- Public key: **2,592 bytes**.
-- Secret key: **4,896 bytes**.
+`contextLength` must equal the number of trailing context bytes. A valid signature returns 63 zero bytes followed by `0x01`. The current go-qrl implementation returns empty data for malformed input and invalid signatures; a canonical 64-byte zero alternative remains under review.
 
-## Size implications (breaks ENS assumptions)
+Hyperion packs its typed arguments into this raw form before `STATICCALL`. It maps empty data and a canonical zero word to `false`, and maps only the exact 64-byte word ending in `0x01` to `true`.
 
-ENS code paths that assume 65-byte secp256k1 signatures do not compose with ML-DSA:
+## QNS signing profile
 
-- **Don't store signatures on-chain.** 4,627-byte sig × N records = gas disaster. Design records so signatures live off-chain (CCIP-Read gateway) with on-chain namehash pointers.
-- **Don't embed pubkeys in call data per-call unless necessary.** 2,592-byte pubkey per call is expensive. Prefer pubkey-by-reference (`bytes32 pubkeyHash` + off-chain fetch) when size matters.
-- **Do publish pubkeys as resolver records.** The `pubkey` profile (Phase 4 QNS extension) stores pubkeys persistently, keyed by namehash — read once per session.
+QNS signs the fixed 64-byte SHAKE256 digest of the canonical record message. ML-DSA-87 receives that digest as its message and uses the context bytes for `QNS-SIGN-v1`.
 
-## On-chain verification: precompile path (confirmed)
-
-Cyyber confirmed 2026-04-21 that Zond ships ML-DSA-87 verification precompile(s). Docs expected 2026-04-28 will document:
-
-- **Address**: TBD (likely a QRL-reserved slot).
-- **ABI**: TBD — the two plausible shapes are `verify(msg, sig, pk, ctx) -> bool` and `verify(msg_with_ctx_hashed_in, sig, pk) -> bool`. These have different cost implications for domain separation.
-- **Gas cost**: TBD. Likely in the 100K-500K range based on comparable verification precompiles (EIP-7251 style). If it lands near 100K, we can use verification liberally in resolvers; if near 1M, we restrict it to rare "set primary name" paths.
-- **Return shape**: bool `0x01`/`0x00`, or "returndata matches message" pattern (like some EVM precompiles).
-- **Recovery variant?** An `ml_dsa_recover(sig, msg) -> pubkey` would eliminate the 2.6KB pubkey from every signed call.
-- **Batch verify?** `verify(sigs[], msgs[], pks[])` would be cheaper for multi-sig-like patterns.
-
-(Send the follow-up questions in `/tmp/cyyber-questions.md`.)
-
-### Call sketch (once docs land)
-
-```solidity
-address constant MLDSA_VERIFY = address(0x??); // TBD
-
-function verifyMlDsa(bytes memory message, bytes memory signature, bytes memory publicKey)
-    internal view returns (bool)
-{
-    (bool ok, bytes memory result) = MLDSA_VERIFY.staticcall(
-        abi.encode(message, signature, publicKey) // + ctx if ABI accepts it
-    );
-    return ok && result.length == 32 && uint256(bytes32(result)) == 1;
-}
+```text
+digest = SHAKE256(record_message, 64)
+signature = ML-DSA-87.Sign(digest, context="QNS-SIGN-v1")
+valid = ML-DSA-87.Verify(digest, signature, public_key, context)
 ```
 
-## In-EVM fallback (NOT needed given precompile confirmation)
+`QRLSignatureVerifier.hyp` exposes `digest`, `verifyDigest`, and the QNS-profile `verify` helper. Its public ABI carries the 64-byte digest as dynamic `bytes` because the current QRL web3 codec accepts standard fixed-byte types only through `bytes32`. The wrapper enforces an exact 64-byte digest before converting it to Hyperion's internal `bytes64` type. The SDK exposes matching digest and raw-payload helpers.
 
-Previously we planned a `ML_DSA_87.verify()` Solidity library at ~5-10M gas per verify as a fallback. This is **no longer needed** — precompile is available. Keeping the note here because a pure-Solidity verifier would remain useful in two scenarios:
+`verifyDigest` is a raw adapter: it forwards the caller-supplied `context` unmodified and does not bind the QNS domain separator. QNS flows MUST use `verify`, which pins `QNS-SIGN-v1`. A contract that authenticates through `verifyDigest` with a caller-controlled context accepts signatures from any protocol's domain; callers binding their own protocol MUST hard-code their own stable context. The signed-record work will revisit whether this entry point stays public once the canonical record-message encoding is frozen.
 
-- A hypothetical QNS fork on a chain without the precompile.
-- Audit comparison ("does the precompile agree with a reference in-EVM verifier for N test vectors?").
+## Security properties
 
-Neither is Phase 4 scope.
+- The verifier uses FIPS 204 ML-DSA-87 through the currently resolved go-qrllib replacement at commit `a6d78f111b1f`. The go-qrl module declares `theQRL/go-qrllib v0.8.0` and replaces it with that fork commit, so release provenance must identify the resolved code explicitly.
+- Context length is capped at 255 bytes as required by ML-DSA.
+- QNS uses explicit domain separation to prevent cross-protocol replay.
+- Contracts should store public keys or their commitments. Raw 4627-byte signatures are better kept in call data or off-chain records.
+- There is no recovery operation. A verifier needs the public key because ML-DSA is not an `ecrecover` analogue.
 
-## Concrete mappings
+Hyperion's CHC engine proved the exact digest-length rejection path, exact verifier dispatch tuple, every byte and index bound of the production QNS context, deterministic formal calls, resolver capability predicates, unauthorized transition models, and reverse-index arithmetic on the aligned compiler. The reproducible gate contains 36 safe targets. Cryptographic correctness is established separately through known vectors, resolved-library tests, compiler semantics, JavaScript differential verification, and live raw plus wrapped calls. See [`FORMAL-SECURITY-VERIFICATION.md`](FORMAL-SECURITY-VERIFICATION.md).
 
-| ENS flow | QNS replacement |
-|---|---|
-| `setNameForAddrWithSignature(address, string name, uint256 expiry, bytes signature)` where signature is EIP-712 over the tuple | Same function shape. Signature is 4,627-byte ML-DSA-87 over keccak256 of the tuple encoded with context `"ZOND/QNS/v1"`. Verifier is the precompile. |
-| EIP-5559 off-chain write: `StorageHandledByOffChainDatabase(url, message)` with client-signed message | Client signs `message` with ML-DSA-87 + ctx. Gateway persists and serves signed response. Read path verifies via precompile. |
-| CCIP-Read: resolver reverts with `OffchainLookup`, client fetches from URL, resolver callback verifies response | Gateway signs response with service ML-DSA key. Resolver callback verifies via precompile. |
+Five local benchmark runs measured medians near 323 ns for SHAKE256 over 64 bytes and 180 microseconds for ML-DSA-87 verification. At the current 125000 charge, a 30 million gas block permits at most 240 verifications, approximately 43 milliseconds at that measured median before scheduling and execution overhead. Cross-platform validator measurements remain a QIP gate.
 
-## Domain separation
+## Pending review
 
-Always use `"ZOND/QNS/v1"` (or later versioned values) as the context string to avoid cross-protocol replay. The library's default `"ZOND"` context is the chain-level separator; QNS adds a protocol-level one.
-
-**Open**: does the precompile accept `ctx` as a parameter or expect it hashed into the message pre-call? This changes how domain separation works on-chain. Part of the Cyyber follow-up.
-
-## Phase 4 delivery checklist
-
-- [x] Resolve ML-DSA precompile availability (Q2 answered by Cyyber 2026-04-21).
-- [ ] Precompile address + ABI + gas cost documented (pending 2026-04-28).
-- [ ] `QRLSignatureVerifier.sol` wrapping the precompile.
-- [ ] `SignatureReverseRegistrar.sol` — ENSIP-19 signature variant.
-- [ ] SDK: `setName(address, name)` wrapping ML-DSA signing with `"ZOND/QNS/v1"` context.
-- [ ] CCIP-Read gateway service (separate repo; off-chain signed record storage).
-- [ ] `IPubkeyResolver` profile — publish ML-DSA-87 pubkeys as name-indexed records (the post-quantum identity extension).
-
-## References
-
-- `@theqrl/mldsa87`: https://github.com/theQRL/qrypto.js
-- Halborn audit report: linked from qrypto.js README (2026-03-31)
-- EIP-3668 (CCIP-Read): https://eips.ethereum.org/EIPS/eip-3668
-- EIP-5559 (off-chain writes): https://eips.ethereum.org/EIPS/eip-5559
-- ENSIP-19 (per-chain reverse + signature variant): https://docs.ens.domains/ensip/19
+- Carry the `qrl2-pq-v1` artifact target and genesis activation rule through release manifests and network configuration.
+- Select the final verifier failure return convention.
+- Review the fixed gas price against representative hardware and denial-of-service budgets.
+- Freeze canonical QNS record-message encoding before signed resolver writes ship.
+- Add cross-language vectors covering the SDK, Hyperion wrapper, and go-qrl precompile.
+- Resolve or explicitly ratify the go-qrllib replacement and publish the consensus build checksum.

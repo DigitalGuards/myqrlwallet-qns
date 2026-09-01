@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+/// @title QRLSignatureVerifier
+/// @notice QNS adapter for the QRL 2.0 SHAKE256 and ML-DSA-87 precompiles.
+/// @dev QNS signs a 64-byte SHAKE256 digest with the context QNS-SIGN-v1.
+contract QRLSignatureVerifier {
+    function qnsContext() internal pure returns (bytes memory) {
+        return bytes("QNS-SIGN-v1");
+    }
+
+    function digest(bytes memory message) public pure returns (bytes memory) {
+        return abi.encodePacked(shake256(message));
+    }
+
+    function verifyDigest(
+        bytes memory messageDigest,
+        bytes memory signature,
+        bytes memory publicKey,
+        bytes memory context
+    ) public pure returns (bool) {
+        if (messageDigest.length != 64) {
+            return false;
+        }
+        return mldsa87verify(bytes64(messageDigest), signature, publicKey, context);
+    }
+
+    function verify(
+        bytes memory message,
+        bytes memory signature,
+        bytes memory publicKey
+    ) public pure returns (bool) {
+        return mldsa87verify(
+            shake256(message),
+            signature,
+            publicKey,
+            qnsContext()
+        );
+    }
+}

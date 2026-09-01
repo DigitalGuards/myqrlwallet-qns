@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// QNS-authored; no upstream ENS counterpart. Consensus-visible: keep in sync
+// with sdk/src/resolver.ts and the shared vector fixture.
+pragma hyperion >=0.0;
+
+/// @dev Native 64-byte QRL reverse-label encoding shared by the registrar and
+///      its formal verification harness.
+library QRLAddressReverse {
+    function pairOffset(uint8 index) internal pure returns (uint256) {
+        require(index < 64);
+        return uint256(index) * 2;
+    }
+
+    function highNibble(uint8 value) internal pure returns (uint8) {
+        return value / 16;
+    }
+
+    function lowNibble(uint8 value) internal pure returns (uint8) {
+        return value & 0x0f;
+    }
+
+    function hexDigit(uint8 value) internal pure returns (bytes1) {
+        require(value < 16);
+        if (value < 10) {
+            return bytes1(value + 48);
+        }
+        return bytes1(value + 87);
+    }
+
+    function encode(address addr) internal pure returns (bytes memory) {
+        bytes64 raw = bytes64(addr);
+        bytes memory encoded = new bytes(128);
+
+        for (uint256 i = 0; i < 64; i++) {
+            uint8 value = uint8(raw[i]);
+            uint256 offset = pairOffset(uint8(i));
+            encoded[offset] = hexDigit(highNibble(value));
+            encoded[offset + 1] = hexDigit(lowNibble(value));
+        }
+
+        return encoded;
+    }
+
+    function labelHash(address addr) internal pure returns (bytes32) {
+        return keccak256(encode(addr));
+    }
+}

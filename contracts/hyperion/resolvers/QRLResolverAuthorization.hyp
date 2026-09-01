@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+/// @dev Shared authorization predicates for the QNS public resolver.
+///      Keeping the policy pure makes its capability boundaries directly
+///      checkable by Hyperion's SMTChecker.
+library QRLResolverAuthorization {
+    function canWrite(
+        address nodeOwner,
+        address caller
+    ) internal pure returns (bool) {
+        return nodeOwner == caller;
+    }
+
+    function canSetName(
+        address nodeOwner,
+        address caller,
+        address trustedReverseRegistrar
+    ) internal pure returns (bool) {
+        return
+            canWrite(nodeOwner, caller) ||
+            (trustedReverseRegistrar != address(0) &&
+                caller == trustedReverseRegistrar);
+    }
+}

@@ -1,24 +1,26 @@
-// Integration test: register a name via FIFS, set its qrlAddr on the resolver,
-// then resolve it end-to-end through @qns/sdk against the live Testnet V2
-// deployment from config/testnet.json.
+// Integration test: register a name via FIFS, set its native QRL 2.0 address,
+// then resolve it end-to-end through @qns/sdk.
 //
 // Usage:
-//   npm run sdk:build                       # compile SDK dist/
-//   npm run register -- alice <24-byte-hex> # defaults to a sentinel if hex omitted
+//   npm run sdk:build
+//   QNS_CONFIG=config/local-qip55.json npm run register -- alice
 //
-// Requires TESTNET_SEED in .env.
+// Set TESTNET_SEED, or use QNS_PUBLIC_DEV_ACCOUNT on the local Kurtosis network.
 
 const fs = require("fs");
 const path = require("path");
+const { pathToFileURL } = require("url");
 
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { Web3 } = require("@theqrl/web3");
-const { loadDeployer } = require("./lib/loadDeployer");
+const { loadDeployerFromEnvironment } = require("./lib/loadDeployer");
 
 const repoRoot = path.join(__dirname, "..");
-const configPath = path.join(repoRoot, "config", "testnet.json");
-const outDir = path.join(repoRoot, "out");
+const configPath = process.env.QNS_CONFIG
+    ? path.resolve(repoRoot, process.env.QNS_CONFIG)
+    : path.join(repoRoot, "config", "local-qip55.json");
+const artifactsDir = path.join(repoRoot, "build", "hyperion");
 const sdkDistDir = path.join(repoRoot, "sdk", "dist");
 
 function loadJson(p) {
@@ -26,12 +28,12 @@ function loadJson(p) {
 }
 
 function loadAbi(contractName) {
-    const artifactPath = path.join(outDir, `${contractName}.sol`, `${contractName}.json`);
-    return loadJson(artifactPath).abi;
+    return loadJson(path.join(artifactsDir, `${contractName}.abi`));
 }
 
-// Per ../QuantaPool/CLAUDE.md: contracts constructed via `new web3.qrl.Contract(abi, addr)`
-// do not inherit the wallet. Use encodeABI + qrl.sendTransaction instead.
+// QRL web3 contracts constructed via `new web3.qrl.Contract(abi, addr)` do not
+// inherit the wallet. Use encodeABI + qrl.sendTransaction instead (the
+// QuantaPool deployment pattern, GPL-3.0).
 async function sendTx(web3, contract, method, account, label) {
     const data = method.encodeABI();
     const gas = await method.estimateGas({ from: account.address });
@@ -45,27 +47,11 @@ async function sendTx(web3, contract, method, account, label) {
     return tx;
 }
 
-function parseSentinel(arg) {
-    // Accept 0x-prefixed or raw; must be 48 hex chars = 24 bytes.
-    let hex = arg || "";
-    if (hex.startsWith("0x")) hex = hex.slice(2);
-    if (hex === "") {
-        // Default sentinel: "QNS-TESTNET-ALPHA-2604-21" padded to 24 bytes.
-        hex = Buffer.from("QNS-TESTNET-ALPHA-24BYTE").toString("hex");
-    }
-    if (hex.length !== 48) {
-        throw new Error(
-            `qrlAddr must be exactly 24 bytes (48 hex chars), got ${hex.length / 2} bytes`
-        );
-    }
-    return "0x" + hex;
-}
-
 // QRL Zond's RPC rejects 0x-prefixed addresses; translate to Q-prefix at the
 // transport boundary. EVM return values still come back 0x-prefixed.
 function toQAddr(addr) {
     if (typeof addr !== "string") return addr;
-    if (addr.startsWith("0x") && addr.length === 42) return "Q" + addr.slice(2);
+    if (addr.startsWith("0x") && addr.length === 130) return "Q" + addr.slice(2);
     return addr;
 }
 
@@ -73,7 +59,7 @@ function toQAddr(addr) {
 function makeSdkProvider(web3) {
     return {
         request: async ({ method, params }) => {
-            if (method === "eth_call") {
+            if (method === "qrl_call") {
                 const [callObj, block] = params;
                 return await web3.qrl.call(
                     { to: toQAddr(callObj.to), data: callObj.data },
@@ -86,31 +72,66 @@ function makeSdkProvider(web3) {
 }
 
 async function main() {
-    const nameLabel = process.argv[2] || "alice";
-    const sentinelHex = parseSentinel(process.argv[3]);
+    const requestedLabel = process.argv[2] || "alice";
+    const forwardOnlyValue = process.env.QNS_FORWARD_ONLY || "0";
+    if (forwardOnlyValue !== "0" && forwardOnlyValue !== "1") {
+        throw new Error("QNS_FORWARD_ONLY must be 0 or 1");
+    }
+    const forwardOnly = forwardOnlyValue === "1";
+
+    // Load and apply the same normalization implementation used by SDK reads
+    // before deriving a labelhash or submitting any transaction.
+    const sdk = await import(pathToFileURL(path.join(sdkDistDir, "index.js")).href);
 
     const config = loadJson(configPath);
-    if (!config.contracts?.ENSRegistry) {
-        throw new Error("config/testnet.json is missing contracts. Run deploy:testnet first.");
+    const nameLabel = sdk.normalize(requestedLabel);
+    const tld = sdk.normalize(config.tld);
+    if (nameLabel.includes(".")) {
+        throw new Error(`registration label must contain one label, got "${requestedLabel}"`);
+    }
+    if (tld.includes(".")) {
+        throw new Error(`configured TLD must contain one label, got "${config.tld}"`);
+    }
+    const fullName = sdk.normalize(`${nameLabel}.${tld}`);
+
+    const registryAddress = config.contracts?.QNSRegistry;
+    if (!registryAddress) {
+        throw new Error(`${configPath} is missing contracts. Run deploy:testnet first.`);
+    }
+    for (const contractName of ["FIFSQRLRegistrar", "QRLPublicResolver"]) {
+        if (!config.contracts?.[contractName]) {
+            throw new Error(`${configPath} is missing ${contractName}`);
+        }
+    }
+    if (!forwardOnly && !config.contracts?.ReverseRegistrar) {
+        throw new Error(
+            `${configPath} is missing ReverseRegistrar; set QNS_FORWARD_ONLY=1 to run an explicit forward-only check`
+        );
     }
 
     console.log("=".repeat(60));
-    console.log(`QNS integration test: ${nameLabel}.${config.tld}`);
+    console.log(`QNS integration test: ${fullName}`);
     console.log("=".repeat(60));
     console.log(`Provider:   ${config.rpcUrl}`);
-    console.log(`Registry:   ${config.contracts.ENSRegistry}`);
+    console.log(`Registry:   ${registryAddress}`);
     console.log(`Resolver:   ${config.contracts.QRLPublicResolver}`);
     console.log(`FIFS:       ${config.contracts.FIFSQRLRegistrar}`);
-    console.log(`qrlAddr:    ${sentinelHex}`);
 
     const web3 = new Web3(config.rpcUrl);
-    if (!process.env.TESTNET_SEED) throw new Error("TESTNET_SEED is required");
-    const account = loadDeployer(web3, process.env.TESTNET_SEED);
+    const chainId = await web3.qrl.getChainId();
+    if (Number(chainId) !== config.chainId) {
+        throw new Error(`chainId mismatch: expected ${config.chainId}, got ${chainId}`);
+    }
+    const account = loadDeployerFromEnvironment(web3, {
+        repoRoot,
+        rpcUrl: config.rpcUrl,
+        chainId,
+    });
     console.log(`Caller:     ${account.address}`);
 
     const registry = new web3.qrl.Contract(
-        loadAbi("ENSRegistry"),
-        config.contracts.ENSRegistry
+        loadAbi("QNSRegistry"),
+        registryAddress
     );
     const fifs = new web3.qrl.Contract(
         loadAbi("FIFSQRLRegistrar"),
@@ -120,7 +141,7 @@ async function main() {
         loadAbi("QRLPublicResolver"),
         config.contracts.QRLPublicResolver
     );
-    const reverseRegistrar = config.contracts.ReverseRegistrar
+    const reverseRegistrar = !forwardOnly && config.contracts.ReverseRegistrar
         ? new web3.qrl.Contract(
               loadAbi("ReverseRegistrar"),
               config.contracts.ReverseRegistrar
@@ -131,18 +152,18 @@ async function main() {
     const ROOT = "0x" + "00".repeat(32);
     const labelHash = web3.utils.keccak256(nameLabel);
     const tldNode = web3.utils.keccak256(
-        ROOT + web3.utils.keccak256(config.tld).slice(2)
+        ROOT + web3.utils.keccak256(tld).slice(2)
     );
     const node = web3.utils.keccak256(
         tldNode + labelHash.slice(2)
     );
     console.log(`\nlabelhash(${nameLabel}) = ${labelHash}`);
-    console.log(`namehash(${nameLabel}.${config.tld}) = ${node}`);
+    console.log(`namehash(${fullName}) = ${node}`);
 
     // ------------------------------------------------------------
     // 1. Register alice.qrl (idempotent: skip if already owned by us)
     // ------------------------------------------------------------
-    console.log("\n[1/4] FIFS register");
+    console.log("\n[1/6] FIFS register");
     const currentOwner = await registry.methods.owner(node).call();
     const ownedByUs = currentOwner.toLowerCase() === account.address.toLowerCase();
     if (ownedByUs) {
@@ -157,11 +178,17 @@ async function main() {
             "fifs.register"
         );
     }
+    const ownerAfterRegistration = await registry.methods.owner(node).call();
+    if (ownerAfterRegistration.toLowerCase() !== account.address.toLowerCase()) {
+        throw new Error(
+            `registration ownership mismatch: got ${ownerAfterRegistration}, expected ${account.address}`
+        );
+    }
 
     // ------------------------------------------------------------
     // 2. Point node at the resolver (skip if already pointed)
     // ------------------------------------------------------------
-    console.log("\n[2/4] registry.setResolver");
+    console.log("\n[2/6] registry.setResolver");
     const currentResolver = await registry.methods.resolver(node).call();
     if (currentResolver.toLowerCase() === config.contracts.QRLPublicResolver.toLowerCase()) {
         console.log(`  skip: already pointing at ${currentResolver}`);
@@ -176,13 +203,13 @@ async function main() {
     }
 
     // ------------------------------------------------------------
-    // 3a. Store legacy `addr` (20-byte EVM) so forward-confirm works for reverse
+    // 3. Store the native 64-byte address for forward and reverse confirmation.
     // ------------------------------------------------------------
-    console.log("\n[3a/6] resolver.setAddr (legacy 20-byte, for forward-confirm)");
-    const currentLegacyAddr = await resolver.methods.addr(node).call();
-    const wantLegacy = account.address.toLowerCase();
-    if (currentLegacyAddr && currentLegacyAddr.toLowerCase().replace(/^q/, "0x") === wantLegacy) {
-        console.log(`  skip: addr already = ${currentLegacyAddr}`);
+    console.log("\n[3/6] resolver.setAddr (native 64-byte address)");
+    const currentAddr = await resolver.methods.addr(node).call();
+    const wantAddr = account.address.toLowerCase().replace(/^0x/, "q");
+    if (currentAddr && currentAddr.toLowerCase().replace(/^0x/, "q") === wantAddr) {
+        console.log(`  skip: addr already = ${currentAddr}`);
     } else {
         await sendTx(
             web3,
@@ -194,28 +221,8 @@ async function main() {
     }
 
     // ------------------------------------------------------------
-    // 3b. Store qrlAddr on the resolver (skip if already correct)
-    // ------------------------------------------------------------
-    console.log("\n[3b/6] resolver.setQrlAddr");
-    const existing = await resolver.methods.qrlAddr(node).call();
-    if (existing && existing.toLowerCase() === sentinelHex.toLowerCase()) {
-        console.log(`  skip: qrlAddr already set to ${existing}`);
-    } else {
-        console.log(`  current: ${existing || "(empty)"}`);
-        console.log(`  setting: ${sentinelHex}`);
-        await sendTx(
-            web3,
-            resolver,
-            resolver.methods.setQrlAddr(node, sentinelHex),
-            account,
-            "resolver.setQrlAddr"
-        );
-    }
-
-    // ------------------------------------------------------------
     // 4. Reverse: set deployer's addr.reverse primary name to this name
     // ------------------------------------------------------------
-    const fullName = `${nameLabel}.${config.tld}`;
     if (reverseRegistrar) {
         console.log("\n[4/6] reverseRegistrar.setName");
         const reverseNode = await reverseRegistrar.methods.node(account.address).call();
@@ -233,16 +240,15 @@ async function main() {
             );
         }
     } else {
-        console.log("\n[4/6] reverse: ReverseRegistrar not in config — skipping");
+        console.log("\n[4/6] reverse: skipped by explicit QNS_FORWARD_ONLY=1");
     }
 
     // ------------------------------------------------------------
     // 5. Forward resolve via @qns/sdk
     // ------------------------------------------------------------
     console.log("\n[5/6] SDK forward resolve");
-    const sdk = require(path.join(sdkDistDir, "index.js"));
     const provider = makeSdkProvider(web3);
-    const cfg = { registry: config.contracts.ENSRegistry, provider };
+    const cfg = { registry: registryAddress, provider };
 
     const sdkNode = sdk.nodeToHex(sdk.namehash(fullName));
     console.log(`  SDK namehash:    ${sdkNode}`);
@@ -254,15 +260,14 @@ async function main() {
     const resolverFromSdk = await sdk.getResolver(fullName, cfg);
     console.log(`  SDK getResolver: ${resolverFromSdk}`);
 
-    const bytes = await sdk.resolveName(fullName, cfg);
-    if (bytes === null) {
-        console.log("  resolveName: null");
+    const resolvedAddress = await sdk.resolveName(fullName, cfg);
+    if (resolvedAddress === null) {
+        throw new Error(`resolveName returned null for ${fullName}`);
     } else {
-        const hex = "0x" + Buffer.from(bytes).toString("hex");
-        console.log(`  resolveName:     ${hex} (${bytes.length} bytes)`);
-        if (hex.toLowerCase() !== sentinelHex.toLowerCase()) {
+        console.log(`  resolveName:     ${resolvedAddress}`);
+        if (resolvedAddress.toLowerCase() !== wantAddr) {
             throw new Error(
-                `MISMATCH: sdk returned ${hex}, expected ${sentinelHex}`
+                `MISMATCH: sdk returned ${resolvedAddress}, expected ${account.address}`
             );
         }
     }
@@ -283,15 +288,19 @@ async function main() {
         console.log(`  verifyReverse:   ${verified}`);
         if (verified !== fullName) {
             throw new Error(
-                `MISMATCH: verifyReverse returned "${verified}", expected "${fullName}" — forward-confirm failed`
+                `MISMATCH: verifyReverse returned "${verified}", expected "${fullName}", forward-confirm failed`
             );
         }
     } else {
-        console.log("\n[6/6] SDK reverse resolve: skipped (no ReverseRegistrar deployed)");
+        console.log("\n[6/6] SDK reverse resolve: skipped by explicit QNS_FORWARD_ONLY=1");
     }
 
     console.log("\n" + "=".repeat(60));
-    console.log(`OK: ${fullName} resolves end-to-end (forward + reverse + forward-confirm).`);
+    if (reverseRegistrar) {
+        console.log(`OK: ${fullName} resolves end-to-end (forward + reverse + forward-confirm).`);
+    } else {
+        console.log(`OK: ${fullName} passes the explicit forward-only resolution check.`);
+    }
     console.log("=".repeat(60));
 }
 
