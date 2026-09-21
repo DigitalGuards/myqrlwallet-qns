@@ -47,7 +47,7 @@ contract ReverseRegistrar is Controllable, IReverseRegistrar {
     modifier authorised(address addr) {
         require(
             addr == msg.sender ||
-                controllers[msg.sender] ||
+                controllers(msg.sender) ||
                 qns.isApprovedForAll(addr, msg.sender) ||
                 ownsContract(addr),
             "ReverseRegistrar: Caller is not a controller or authorised by address or the address itself"

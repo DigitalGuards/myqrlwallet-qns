@@ -5,7 +5,7 @@ import "../openzeppelin/utils/introspection/ERC165.hyp";
 import "./profiles/IVersionableResolver.hyp";
 
 abstract contract ResolverBase is ERC165, IVersionableResolver {
-    mapping(bytes32 => uint64) public recordVersions;
+    mapping(bytes32 => uint64) private _recordVersions;
 
     function isAuthorised(bytes32 node) internal view virtual returns (bool);
 
@@ -14,12 +14,20 @@ abstract contract ResolverBase is ERC165, IVersionableResolver {
         _;
     }
 
+    /// @inheritdoc IVersionableResolver
+    /// @dev Explicit access preserves the complete bytes32 node key.
+    function recordVersions(
+        bytes32 node
+    ) public view virtual override returns (uint64) {
+        return _recordVersions[node];
+    }
+
     /// Increments the record version associated with an ENS node.
     /// May only be called by the owner of that node in the ENS registry.
     /// @param node The node to update.
     function clearRecords(bytes32 node) public virtual authorised(node) {
-        recordVersions[node]++;
-        emit VersionChanged(node, recordVersions[node]);
+        _recordVersions[node]++;
+        emit VersionChanged(node, _recordVersions[node]);
     }
 
     function supportsInterface(

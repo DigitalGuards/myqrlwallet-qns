@@ -6,7 +6,8 @@ on:
   pull_request:
     branches: [main]
 
-# The Hyperion compile gate (npm run compile), the formal proof gate
+# The Hyperion compile and native semantic gates (npm run compile and
+# npm run test:semantic), the formal proof gate
 # (npm run verify:formal, needs a Z3-enabled hypc build), and the live
 # behavior suite (npm run test:behavior, needs a deployed local Kurtosis
 # stack) run locally: hosted runners have no hypc distribution yet. CI

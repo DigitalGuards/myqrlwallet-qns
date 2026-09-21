@@ -11,10 +11,10 @@
 //   npm run compile && QNS_CONFIG=config/local-qip55.json npm run deploy:testnet
 //   QNS_BEHAVIOR=1 QNS_PUBLIC_DEV_ACCOUNT=0 npm run test:behavior
 //
-// Requires two funded public development accounts on the local network
-// (QNS_PUBLIC_DEV_ACCOUNT for the primary, QNS_BEHAVIOR_SECOND_ACCOUNT for
-// the adversary, default 1). The suite registers fresh run-scoped labels and
-// never touches existing names.
+// Requires a funded owned primary and a separate owned counterparty:
+// TESTNET_SEED and QNS_BEHAVIOR_SECOND_SEED on private Testnet v3.
+// Explicit public fixture selectors remain restricted to local Kurtosis.
+// The suite registers fresh run-scoped labels and never touches existing names.
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -30,10 +30,10 @@ if (process.env.QNS_BEHAVIOR !== "1") {
 } else {
     const { Web3 } = require("@theqrl/web3");
     const {
-        loadDeployer,
         loadDeployerFromEnvironment,
-        loadPublicDevSeed,
+        loadBehaviorCounterparty,
     } = require("../../scripts/lib/loadDeployer");
+    const { assertNetworkIdentity } = require("../../scripts/lib/networkIdentity");
 
     const configPath = process.env.QNS_CONFIG
         ? path.resolve(repoRoot, process.env.QNS_CONFIG)
@@ -51,7 +51,7 @@ if (process.env.QNS_BEHAVIOR !== "1") {
     test("contract behavior suite", { timeout: 600000 }, async (t) => {
         const config = loadJson(configPath);
         const web3 = new Web3(config.rpcUrl);
-        const chainId = Number(await web3.qrl.getChainId());
+        const chainId = Number(await assertNetworkIdentity(web3, config));
         assert.equal(chainId, config.chainId, "config chainId matches the node");
 
         const alice = loadDeployerFromEnvironment(web3, {
@@ -60,11 +60,12 @@ if (process.env.QNS_BEHAVIOR !== "1") {
             chainId,
             env: process.env,
         });
-        const secondIndex = process.env.QNS_BEHAVIOR_SECOND_ACCOUNT || "1";
-        const bob = loadDeployer(
-            web3,
-            loadPublicDevSeed(repoRoot, secondIndex, process.env)
-        );
+        const bob = loadBehaviorCounterparty(web3, {
+            repoRoot,
+            rpcUrl: config.rpcUrl,
+            chainId,
+            env: process.env,
+        });
         assert.notEqual(
             alice.address.toLowerCase(),
             bob.address.toLowerCase(),
@@ -85,6 +86,7 @@ if (process.env.QNS_BEHAVIOR !== "1") {
         const send = async (contract, methodCall, from) => {
             const gas = await methodCall.estimateGas({ from });
             return web3.qrl.sendTransaction({
+                chainId: await assertNetworkIdentity(web3, config),
                 from,
                 to: contract.options.address,
                 data: methodCall.encodeABI(),

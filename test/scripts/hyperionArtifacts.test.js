@@ -6,10 +6,14 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+    HYPERION_CODEGEN_MODE,
     QRL2_PRECOMPILE_SET,
+    compilerCodegenArgs,
     createArtifactManifest,
     parseCompilerVersion,
+    sha256File,
     validateDeploymentTarget,
+    verifyPinnedCompiler,
     verifyArtifactManifest,
 } = require("../../scripts/lib/hyperionArtifacts");
 const {
@@ -30,12 +34,28 @@ function createFixture(t) {
     const compilerPath = path.join(root, "hypc");
     fs.writeFileSync(compilerPath, "#!/bin/sh\nexit 0\n");
     fs.chmodSync(compilerPath, 0o700);
+    const compilerVersion = "0.2.0+commit.12345678.Linux.g++";
+    const compilerSha256 = sha256File(compilerPath);
+    const toolchainConfigPath = path.join(root, "hyperion-toolchain.json");
+    fs.writeFileSync(
+        toolchainConfigPath,
+        `${JSON.stringify(
+            {
+                hyperionCommit: "1234567890abcdef1234567890abcdef12345678",
+                compilerVersion,
+                compilerSha256,
+            },
+            null,
+            2
+        )}\n`
+    );
 
     const manifest = createArtifactManifest({
         compilerPath,
-        compilerVersion: "0.2.0+commit.12345678.Linux.g++",
+        compilerVersion,
         hyperionRoot,
         artifactsDir,
+        codegenMode: HYPERION_CODEGEN_MODE,
         contracts: [
             {
                 sourceFile: "Example.hyp",
@@ -49,14 +69,44 @@ function createFixture(t) {
         path.join(artifactsDir, "manifest.json"),
         `${JSON.stringify(manifest, null, 2)}\n`
     );
-    return { artifactsDir, hyperionRoot };
+    return {
+        artifactsDir,
+        compilerPath,
+        compilerSha256,
+        compilerVersion,
+        hyperionRoot,
+        toolchainConfigPath,
+    };
 }
 
 test("verifies compiler, source and artifact provenance", (t) => {
     const fixture = createFixture(t);
     const manifest = verifyArtifactManifest(fixture);
     assert.equal(manifest.target.name, QRL2_PRECOMPILE_SET);
+    assert.equal(manifest.settings.codegenMode, HYPERION_CODEGEN_MODE);
+    assert.equal(manifest.settings.viaIR, true);
     assert.equal(manifest.contracts[0].contractName, "Example");
+});
+
+test("requires the explicit via-IR codegen mode", (t) => {
+    assert.deepEqual(compilerCodegenArgs(HYPERION_CODEGEN_MODE), ["--via-ir"]);
+    assert.throws(() => compilerCodegenArgs("legacy"), /Unsupported Hyperion codegen mode/);
+
+    const fixture = createFixture(t);
+    const manifestPath = path.join(fixture.artifactsDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+
+    for (const settings of [
+        { ...manifest.settings, codegenMode: "legacy", viaIR: false },
+        { ...manifest.settings, viaIR: false },
+        { ...manifest.settings, codegenMode: undefined },
+    ]) {
+        fs.writeFileSync(
+            manifestPath,
+            `${JSON.stringify({ ...manifest, settings }, null, 2)}\n`
+        );
+        assert.throws(() => verifyArtifactManifest(fixture), /must use Hyperion via-ir/);
+    }
 });
 
 test("rejects artifact and source changes after compilation", async (t) => {
@@ -90,6 +140,68 @@ test("rejects unknown compiler version output", () => {
     );
     assert.throws(() => parseCompilerVersion("hypc\n"), /Version line/);
     assert.throws(() => parseCompilerVersion("Version: unknown\n"), /unknown/);
+});
+
+test("rejects an unreviewed compiler version or binary", (t) => {
+    const fixture = createFixture(t);
+    const toolchain = {
+        compilerVersion: fixture.compilerVersion,
+        compilerSha256: fixture.compilerSha256,
+    };
+
+    assert.equal(
+        verifyPinnedCompiler({
+            compilerPath: fixture.compilerPath,
+            compilerVersion: fixture.compilerVersion,
+            toolchain,
+        }),
+        fixture.compilerSha256
+    );
+    assert.throws(
+        () =>
+            verifyPinnedCompiler({
+                compilerPath: fixture.compilerPath,
+                compilerVersion: "0.2.0-develop.2026.4.13+commit.d5d1b977.Linux.g++",
+                toolchain,
+            }),
+        /Unreviewed Hyperion compiler version/
+    );
+    assert.throws(
+        () =>
+            verifyPinnedCompiler({
+                compilerPath: fixture.compilerPath,
+                compilerVersion: fixture.compilerVersion,
+                toolchain: { ...toolchain, compilerSha256: "00".repeat(32) },
+            }),
+        /Unreviewed Hyperion compiler binary/
+    );
+});
+
+test("rejects manifests produced by an unreviewed compiler", async (t) => {
+    await t.test("version", (t) => {
+        const fixture = createFixture(t);
+        const manifestPath = path.join(fixture.artifactsDir, "manifest.json");
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        manifest.compiler.version =
+            "0.2.0-develop.2026.4.13+commit.d5d1b977.Linux.g++";
+        fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+        assert.throws(
+            () => verifyArtifactManifest(fixture),
+            /compiler version is not the reviewed QNS toolchain/
+        );
+    });
+
+    await t.test("binary hash", (t) => {
+        const fixture = createFixture(t);
+        const manifestPath = path.join(fixture.artifactsDir, "manifest.json");
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        manifest.compiler.sha256 = "00".repeat(32);
+        fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+        assert.throws(
+            () => verifyArtifactManifest(fixture),
+            /compiler binary is not the reviewed QNS toolchain/
+        );
+    });
 });
 
 test("live target probe checks SHAKE256 slot 6 and the 64-byte ML-DSA-87 slot 3 frame", async () => {

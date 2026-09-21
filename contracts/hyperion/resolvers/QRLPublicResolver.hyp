@@ -77,11 +77,11 @@ contract QRLPublicResolver is
     // -----------------------------------------------------------------
 
     function addr(bytes32 node) external view override returns (address payable) {
-        return payable(_addr[recordVersions[node]][node]);
+        return payable(_addr[recordVersions(node)][node]);
     }
 
     function setAddr(bytes32 node, address a) external authorised(node) {
-        _addr[recordVersions[node]][node] = a;
+        _addr[recordVersions(node)][node] = a;
         emit AddrChanged(node, a);
     }
 
@@ -93,7 +93,7 @@ contract QRLPublicResolver is
         bytes32 node,
         string calldata key
     ) external view override returns (string memory) {
-        return _texts[recordVersions[node]][node][key];
+        return _texts[recordVersions(node)][node][key];
     }
 
     function setText(
@@ -101,7 +101,7 @@ contract QRLPublicResolver is
         string calldata key,
         string calldata value
     ) external authorised(node) {
-        _texts[recordVersions[node]][node][key] = value;
+        _texts[recordVersions(node)][node][key] = value;
         emit TextChanged(node, key, key, value);
     }
 
@@ -110,11 +110,11 @@ contract QRLPublicResolver is
     // -----------------------------------------------------------------
 
     function contenthash(bytes32 node) external view override returns (bytes memory) {
-        return _contenthashes[recordVersions[node]][node];
+        return _contenthashes[recordVersions(node)][node];
     }
 
     function setContenthash(bytes32 node, bytes calldata hash) external authorised(node) {
-        _contenthashes[recordVersions[node]][node] = hash;
+        _contenthashes[recordVersions(node)][node] = hash;
         emit ContenthashChanged(node, hash);
     }
 
@@ -123,7 +123,7 @@ contract QRLPublicResolver is
     // -----------------------------------------------------------------
 
     function name(bytes32 node) external view override returns (string memory) {
-        return _names[recordVersions[node]][node];
+        return _names[recordVersions(node)][node];
     }
 
     /// Called by `ReverseRegistrar.setNameForAddr` after it has claimed the
@@ -133,7 +133,7 @@ contract QRLPublicResolver is
         bytes32 node,
         string calldata newName
     ) external authorisedName(node) {
-        _names[recordVersions[node]][node] = newName;
+        _names[recordVersions(node)][node] = newName;
         emit NameChanged(node, newName);
     }
 

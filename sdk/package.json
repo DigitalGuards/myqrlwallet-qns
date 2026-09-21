@@ -29,10 +29,11 @@
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11",
+    "@qrlwallet/connect": "5.0.1"
   },
   "peerDependencies": {
-    "@qrlwallet/connect": ">=2.0.0 <5.0.0",
+    "@qrlwallet/connect": ">=5.0.1 <6.0.0",
     "@theqrl/mldsa87": "^2.1.4"
   },
   "peerDependenciesMeta": {
