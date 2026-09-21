@@ -19,6 +19,7 @@ const {
 } = require("./lib/hyperionArtifacts");
 const { loadDeployerFromEnvironment } = require("./lib/loadDeployer");
 const { assertQrl2PQPrecompileTarget } = require("./lib/qrl2Target");
+const { assertNetworkIdentity } = require("./lib/networkIdentity");
 
 const repoRoot = path.join(__dirname, "..");
 const configPath = process.env.QNS_CONFIG
@@ -26,6 +27,7 @@ const configPath = process.env.QNS_CONFIG
     : path.join(repoRoot, "config", "local-qip55.json");
 const hyperionArtifactsDir = path.join(repoRoot, "build", "hyperion");
 let verifiedArtifactManifest;
+let verifyNetwork;
 
 function loadJson(p) {
     return JSON.parse(fs.readFileSync(p, "utf8"));
@@ -67,6 +69,7 @@ async function deployContract(web3, account, contractName, constructorArgs = [])
     console.log(`  gas estimate: ${gas}`);
 
     const deployed = await deployTx.send({
+        chainId: await verifyNetwork(),
         from: account.address,
         gas: Math.floor(Number(gas) * 1.2),
     });
@@ -78,6 +81,7 @@ async function deployContract(web3, account, contractName, constructorArgs = [])
 async function sendTx(method, account, label) {
     const gas = await method.estimateGas({ from: account.address });
     const tx = await method.send({
+        chainId: await verifyNetwork(),
         from: account.address,
         gas: Math.floor(Number(gas) * 1.2),
     });
@@ -129,7 +133,8 @@ async function main() {
     console.log(`Compiler:        ${verifiedArtifactManifest.compiler.version}`);
 
     const web3 = new Web3(config.rpcUrl);
-    const chainId = await web3.qrl.getChainId();
+    verifyNetwork = () => assertNetworkIdentity(web3, config);
+    const chainId = await verifyNetwork();
     console.log(`Connected chainId: ${chainId}`);
     if (Number(chainId) !== config.chainId) {
         throw new Error(

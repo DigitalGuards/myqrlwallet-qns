@@ -1,0 +1,87 @@
+==== ExternalSource: _canonical/vendored/root/Controllable.hyp ====
+==== ExternalSource: _canonical/vendored/root/Root.hyp ====
+==== ExternalSource: _canonical/vendored/resolvers/ResolverBase.hyp ====
+==== ExternalSource: _canonical/vendored/resolvers/profiles/IVersionableResolver.hyp ====
+==== ExternalSource: _canonical/vendored/registry/IQNSRegistry.hyp ====
+==== ExternalSource: _canonical/vendored/openzeppelin/access/Ownable.hyp ====
+==== ExternalSource: _canonical/vendored/openzeppelin/utils/introspection/ERC165.hyp ====
+==== ExternalSource: _canonical/vendored/openzeppelin/utils/introspection/IERC165.hyp ====
+==== Source: QNSExplicitMappingAccessors.hyp ====
+import {Controllable} from "_canonical/vendored/root/Controllable.hyp";
+import {Root} from "_canonical/vendored/root/Root.hyp";
+import {ResolverBase} from "_canonical/vendored/resolvers/ResolverBase.hyp";
+import {IQNSRegistry} from "_canonical/vendored/registry/IQNSRegistry.hyp";
+
+contract ResolverVersionHarness is ResolverBase {
+    function isAuthorised(bytes32) internal pure override returns (bool) {
+        return true;
+    }
+}
+
+contract QNSExplicitMappingAccessors {
+    Controllable private _controllable;
+    Root private _root;
+    ResolverVersionHarness private _resolver;
+
+    constructor() {
+        _controllable = new Controllable();
+        _root = new Root(IQNSRegistry(address(0)));
+        _resolver = new ResolverVersionHarness();
+    }
+
+    function setController(address controller, bool enabled) external {
+        _controllable.setController(controller, enabled);
+    }
+
+    function controller(address account) external view returns (bool) {
+        return _controllable.controllers(account);
+    }
+
+    function lock(bytes32 label) external {
+        _root.lock(label);
+    }
+
+    function isLocked(bytes32 label) external view returns (bool) {
+        return _root.locked(label);
+    }
+
+    function clear(bytes32 node) external {
+        _resolver.clearRecords(node);
+    }
+
+    function version(bytes32 node) external view returns (uint64) {
+        return _resolver.recordVersions(node);
+    }
+}
+// ====
+// compileViaYul: false
+// ----
+// constructor()
+// ~ emit OwnershipTransferred(address,address) from Q0000000000000000000000000000000000000000000000000000000000000000a2c09b0901c4385dddc8a62d8dd8cb54995b78bbd757bfdee5a32af7ef8f0059: #Q00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, #Q0000000000000000000000000000000000000000000000000000000000000000254f38cb8201943b6e48e06b3847a41d40c0c5f7cf5c0c3f4b4006528454c7ff
+// ~ emit OwnershipTransferred(address,address) from Q0000000000000000000000000000000000000000000000000000000000000000f0fd799a912e1629912707b5182316522f2ff12caf984a9e20a51ea57ccf6c4d: #Q00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, #Q0000000000000000000000000000000000000000000000000000000000000000254f38cb8201943b6e48e06b3847a41d40c0c5f7cf5c0c3f4b4006528454c7ff
+// setController(address,bool): Q1111111111111111111111111111111111111111111111111111111111111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, true ->
+// ~ emit ControllerChanged(address,bool) from Q0000000000000000000000000000000000000000000000000000000000000000a2c09b0901c4385dddc8a62d8dd8cb54995b78bbd757bfdee5a32af7ef8f0059: #Q1111111111111111111111111111111111111111111111111111111111111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, true
+// setController(address,bool): Q2222222222222222222222222222222222222222222222222222222222222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, false ->
+// ~ emit ControllerChanged(address,bool) from Q0000000000000000000000000000000000000000000000000000000000000000a2c09b0901c4385dddc8a62d8dd8cb54995b78bbd757bfdee5a32af7ef8f0059: #Q2222222222222222222222222222222222222222222222222222222222222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, false
+// controller(address): Q1111111111111111111111111111111111111111111111111111111111111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> true
+// controller(address): Q2222222222222222222222222222222222222222222222222222222222222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> false
+// setController(address,bool): Q2222222222222222222222222222222222222222222222222222222222222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, true ->
+// ~ emit ControllerChanged(address,bool) from Q0000000000000000000000000000000000000000000000000000000000000000a2c09b0901c4385dddc8a62d8dd8cb54995b78bbd757bfdee5a32af7ef8f0059: #Q2222222222222222222222222222222222222222222222222222222222222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, true
+// controller(address): Q1111111111111111111111111111111111111111111111111111111111111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> true
+// controller(address): Q2222222222222222222222222222222222222222222222222222222222222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> true
+// lock(bytes32): left(0x3333333333333333333333333333333333333333333333333333333333333333) ->
+// ~ emit TLDLocked(bytes32) from Q0000000000000000000000000000000000000000000000000000000000000000f0fd799a912e1629912707b5182316522f2ff12caf984a9e20a51ea57ccf6c4d: #"33333333333333333333333333333333"
+// isLocked(bytes32): left(0x3333333333333333333333333333333333333333333333333333333333333333) -> true
+// isLocked(bytes32): left(0x4444444444444444444444444444444444444444444444444444444444444444) -> false
+// lock(bytes32): left(0x4444444444444444444444444444444444444444444444444444444444444444) ->
+// ~ emit TLDLocked(bytes32) from Q0000000000000000000000000000000000000000000000000000000000000000f0fd799a912e1629912707b5182316522f2ff12caf984a9e20a51ea57ccf6c4d: #"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+// isLocked(bytes32): left(0x3333333333333333333333333333333333333333333333333333333333333333) -> true
+// isLocked(bytes32): left(0x4444444444444444444444444444444444444444444444444444444444444444) -> true
+// clear(bytes32): left(0x3333333333333333333333333333333333333333333333333333333333333333) ->
+// ~ emit VersionChanged(bytes32,uint64) from Q000000000000000000000000000000000000000000000000000000000000000002fcb59f92d2779a22e4778d3db70b929873c158e2ca82bb15a4afae7818b0d6: #"33333333333333333333333333333333", 0x01
+// clear(bytes32): left(0x4444444444444444444444444444444444444444444444444444444444444444) ->
+// ~ emit VersionChanged(bytes32,uint64) from Q000000000000000000000000000000000000000000000000000000000000000002fcb59f92d2779a22e4778d3db70b929873c158e2ca82bb15a4afae7818b0d6: #"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", 0x01
+// clear(bytes32): left(0x4444444444444444444444444444444444444444444444444444444444444444) ->
+// ~ emit VersionChanged(bytes32,uint64) from Q000000000000000000000000000000000000000000000000000000000000000002fcb59f92d2779a22e4778d3db70b929873c158e2ca82bb15a4afae7818b0d6: #"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", 0x02
+// version(bytes32): left(0x3333333333333333333333333333333333333333333333333333333333333333) -> 1
+// version(bytes32): left(0x4444444444444444444444444444444444444444444444444444444444444444) -> 2

@@ -10,7 +10,7 @@ const ADDRESS_HEX = 128;
 /**
  * EIP-1193-style provider. Any object exposing an async `request({method, params})`
  * works. Known-compatible providers:
- *   - `@qrlwallet/connect` v2-v4 (primary: mobile QR/deep-link session to MyQRLWallet,
+ *   - `@qrlwallet/connect` v5 (primary: mobile QR/deep-link session to MyQRLWallet,
  *     post-quantum ML-KEM-768 relay). Construct a `QRLConnectProvider` and pass it in.
  *   - ethers/viem provider wrappers (if pointed at a QRL Zond RPC endpoint).
  *   - Node-side: shim over `@theqrl/web3`'s `web3.qrl.call`, see

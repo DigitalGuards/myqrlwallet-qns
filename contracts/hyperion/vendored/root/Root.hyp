@@ -19,7 +19,7 @@ contract Root is Controllable {
     event TLDLocked(bytes32 indexed label);
 
     IQNSRegistry public qns;
-    mapping(bytes32 => bool) public locked;
+    mapping(bytes32 => bool) private _locked;
 
     constructor(IQNSRegistry _qns) {
         qns = _qns;
@@ -30,11 +30,17 @@ contract Root is Controllable {
         return qns;
     }
 
+    /// @notice Returns whether a top-level label is permanently locked.
+    /// @dev Explicit access preserves the complete bytes32 label key.
+    function locked(bytes32 label) external view returns (bool) {
+        return _locked[label];
+    }
+
     function setSubnodeOwner(
         bytes32 label,
         address owner
     ) external onlyController {
-        require(!locked[label]);
+        require(!_locked[label]);
         qns.setSubnodeOwner(ROOT_NODE, label, owner);
     }
 
@@ -44,7 +50,7 @@ contract Root is Controllable {
 
     function lock(bytes32 label) external onlyOwner {
         emit TLDLocked(label);
-        locked[label] = true;
+        _locked[label] = true;
     }
 
     function supportsInterface(

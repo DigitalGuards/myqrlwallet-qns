@@ -7,7 +7,7 @@ const { MLDSA87 } = require("@theqrl/wallet.js");
 
 const MNEMONIC_WORDS = 34;
 const EXTENDED_SEED_HEX_LENGTH = 102;
-const LOCAL_KURTOSIS_CHAIN_ID = 3151908;
+const DEFAULT_LOCAL_KURTOSIS_CHAIN_ID = 3151908;
 
 function loadDeployer(web3, secret) {
     const value = secret?.trim() || "";
@@ -62,6 +62,21 @@ function isLoopbackRpcUrl(rpcUrl) {
     return ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);
 }
 
+function publicDevChainId(env = process.env) {
+    const value = env.QNS_PUBLIC_DEV_CHAIN_ID?.trim();
+    if (!value) {
+        return DEFAULT_LOCAL_KURTOSIS_CHAIN_ID;
+    }
+    if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+        throw new Error("QNS_PUBLIC_DEV_CHAIN_ID must be a positive decimal integer");
+    }
+    const chainId = Number(value);
+    if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+        throw new Error("QNS_PUBLIC_DEV_CHAIN_ID must be a positive safe integer");
+    }
+    return chainId;
+}
+
 function loadPublicDevSeed(repoRoot, accountIndex, env = process.env) {
     if (!/^(0|[1-9][0-9]*)$/.test(accountIndex)) {
         throw new Error("QNS_PUBLIC_DEV_ACCOUNT must be a non-negative integer");
@@ -91,10 +106,11 @@ function loadDeployerFromEnvironment(web3, options) {
     const { repoRoot, rpcUrl, chainId, env = process.env } = options;
     const publicDevAccount = env.QNS_PUBLIC_DEV_ACCOUNT?.trim();
     if (publicDevAccount) {
-        if (!isLoopbackRpcUrl(rpcUrl) || Number(chainId) !== LOCAL_KURTOSIS_CHAIN_ID) {
+        const expectedChainId = publicDevChainId(env);
+        if (Number(chainId) === 3151909 || !isLoopbackRpcUrl(rpcUrl) || Number(chainId) !== expectedChainId) {
             throw new Error(
                 "QNS_PUBLIC_DEV_ACCOUNT is restricted to the local Kurtosis network " +
-                    `(loopback RPC URL, chain ${LOCAL_KURTOSIS_CHAIN_ID})`
+                    `(loopback RPC URL, chain ${expectedChainId})`
             );
         }
         const seed = loadPublicDevSeed(repoRoot, publicDevAccount, env);
@@ -111,10 +127,29 @@ function loadDeployerFromEnvironment(web3, options) {
     );
 }
 
+function loadBehaviorCounterparty(web3, options) {
+    const env = options.env || process.env;
+    if (env.QNS_BEHAVIOR_SECOND_SEED?.trim()) {
+        return loadDeployer(web3, env.QNS_BEHAVIOR_SECOND_SEED);
+    }
+    if (!env.QNS_PUBLIC_DEV_ACCOUNT?.trim()) {
+        throw new Error("Set QNS_BEHAVIOR_SECOND_SEED for the owned private-network test counterparty");
+    }
+    return loadDeployerFromEnvironment(web3, {
+        ...options,
+        env: {
+            ...env,
+            QNS_PUBLIC_DEV_ACCOUNT: env.QNS_BEHAVIOR_SECOND_ACCOUNT || "1",
+        },
+    });
+}
+
 module.exports = {
     isLoopbackRpcUrl,
     loadDeployer,
     loadDeployerFromEnvironment,
+    loadBehaviorCounterparty,
     loadPublicDevSeed,
     parsePublicDevSeeds,
+    publicDevChainId,
 };

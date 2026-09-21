@@ -4,6 +4,10 @@ QNS is a Hyperion-native naming service for QRL 2.0. It keeps the stable ENS v1 
 
 Status: active QRL 2.0 migration work. The contracts compile only with the 64-byte Hyperion toolchain. A local `config/testnet.json` may retain the legacy 20-byte Testnet V2 (chain ID 1337) deployment as historical state; that file is ignored because deployment records can contain private infrastructure details. Use a fresh 64-byte network for new deployments.
 
+`config/testnet-v3.example.json` identifies MyQRLWallet Testnet v3 (private), chain `3151909`, with its pinned genesis. Copy it to a separate ignored deployment configuration after deployment approval. The scripts verify chain and genesis before every write and retain the precompile capability checks. The example contains no deployed contract addresses. Preserve historical v2 records separately.
+
+The QNS SDK supports Connect `>=5.0.1 <6.0.0` and its full-width account and RPC formats. Local tests include the published Connect provider's request/response path with a controlled in-memory transport; live wallet pairing and deployed-contract activation remain separate release gates.
+
 ## Design
 
 - Hyperion is the sole contract source language.
@@ -29,10 +33,10 @@ docs/                 Protocol decisions, migration notes, and QIP groundwork
 ```bash
 npm install
 npm --prefix sdk install
-HYPERION_COMPILER=../hyperion/build/hypc/hypc npm test
+npm test
 ```
 
-The test command compiles every deployable contract with Hyperion, runs the deployment-script unit tests, type-checks the SDK, and runs its unit tests. `npm run test:behavior` runs the live contract behavior suite against a deployed stack (it skips itself when `QNS_BEHAVIOR=1` is not set).
+The test command uses the central 64-byte compiler at `../hyperion/build/hypc/hypc`, verifies its exact version and SHA-256 against `config/hyperion-toolchain.json`, compiles every deployable contract through via-IR, executes the Q128 and `bytes32` mapping-accessor regression under default and optimized legacy and via-IR codegen, runs the deployment-script unit tests, type-checks the SDK, and runs its unit tests. `HYPERION_COMPILER` and `HYPC_BIN` may select another path only when that binary has the reviewed identity. `npm run test:behavior` runs the live contract behavior suite against a deployed stack (it skips itself when `QNS_BEHAVIOR=1` is not set).
 
 Build Hyperion with Z3 support and run the reproducible formal security gate with:
 
@@ -67,7 +71,7 @@ The qrl-package execution client listens on `0.0.0.0` inside its container and e
 Copy the reported execution RPC URL into `config/local-qip55.json`, compile, and deploy with:
 
 ```bash
-HYPERION_COMPILER=../hyperion/build/hypc/hypc npm run compile
+npm run compile
 QNS_CONFIG=config/local-qip55.json npm run deploy:testnet
 ```
 
@@ -79,7 +83,7 @@ QNS_PUBLIC_DEV_ACCOUNT=0 npm run register -- alice
 npm run verify:pq
 ```
 
-The local config must declare `"qrl2PrecompileSet": "qrl2-pq-v1"`. Deployment verifies the exact compiler, source, ABI, and bytecode hashes, checks the chain ID, and executes live 64-byte ML-DSA-87 slot 3 plus SHAKE256 slot 6 probes before its first transaction. The command-scoped public account selector is accepted only when the configured RPC URL has a loopback host and the connected chain ID is `3151908`. When explicitly set, the selector takes precedence over a `TESTNET_SEED` in the ignored `.env`. Keep `QNS_PUBLIC_DEV_ACCOUNT` out of persistent `.env` files. Use `TESTNET_SEED` for other development networks. Never put a private seed in tracked files or shell history.
+The local config must declare `"qrl2PrecompileSet": "qrl2-pq-v1"`. Deployment verifies the exact compiler, source, ABI, and bytecode hashes, checks the chain ID, and executes live 64-byte ML-DSA-87 slot 3 plus SHAKE256 slot 6 probes before its first transaction. The command-scoped public account selector is accepted only when the configured RPC URL has a loopback host and the connected chain ID matches the pinned local chain. Chain `3151908` is the default; set `QNS_PUBLIC_DEV_CHAIN_ID` in the same command when a fresh isolated enclave deliberately uses another chain ID. When explicitly set, the selector takes precedence over a `TESTNET_SEED` in the ignored `.env`. Keep both public-development selectors out of persistent `.env` files. Use `TESTNET_SEED` for other development networks. Never put a private seed in tracked files or shell history.
 
 The initial deployment account remains the owner of `Root`, a Root controller, and the owner of `ReverseRegistrar`. Treat that account as an alpha administrator until the community selects a governance owner and an explicit controller-revocation plus ownership-transfer procedure. Do not renounce these roles before verifying the complete handoff on the target network.
 

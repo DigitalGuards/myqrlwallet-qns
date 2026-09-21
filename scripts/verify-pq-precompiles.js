@@ -16,6 +16,7 @@ const {
     zeroize,
 } = require("@theqrl/mldsa87");
 const { Web3 } = require("@theqrl/web3");
+const { assertNetworkIdentity } = require("./lib/networkIdentity");
 
 const repoRoot = path.join(__dirname, "..");
 const configPath = process.env.QNS_CONFIG
@@ -78,7 +79,7 @@ async function main() {
 
     const abi = loadJson(path.join(artifactsDir, "QRLSignatureVerifier.abi"));
     const web3 = new Web3(config.rpcUrl);
-    const chainId = await web3.qrl.getChainId();
+    const chainId = await assertNetworkIdentity(web3, config);
     if (Number(chainId) !== config.chainId) {
         throw new Error(`chainId mismatch: expected ${config.chainId}, got ${chainId}`);
     }

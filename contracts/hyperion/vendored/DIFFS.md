@@ -7,7 +7,7 @@ This file records every intentional divergence from the pinned upstream sources.
 ## Hyperion conversion (all files)
 
 - Sources converted from Solidity to `.hyp`; imports rewritten to relative Hyperion paths. Hyperion is the canonical source language; there is no generated Solidity mirror.
-- `pragma solidity >=0.8.4` replaced by `pragma hyperion >=0.0`, which drops the language-version floor. `ResolverBase.hyp` (public mapping implicitly overriding `IVersionableResolver.recordVersions`) and `ERC165.hyp` (implicit `IERC165` override) rely on the implicit-interface-override rule; revisit the floor once Hyperion adopts release versioning.
+- `pragma solidity >=0.8.4` replaced by `pragma hyperion >=0.0`, which drops the language-version floor. `ERC165.hyp` relies on the implicit `IERC165` interface override rule; revisit the floor once Hyperion adopts release versioning.
 - SPDX headers added to upstream files that shipped without one (`ENSRegistry`, `ReverseRegistrar`, `Root`, `Controllable`, `IReverseRegistrar`).
 
 ## Ownership compatibility
@@ -17,6 +17,12 @@ The in-tree `openzeppelin/access/Ownable.hyp` follows the OpenZeppelin v5 shape:
 - `root/Controllable.hyp` calls `Ownable(msg.sender)`.
 - `root/Root.hyp` inherits `Controllable` once and removes redundant direct `Ownable` inheritance.
 - `reverseRegistrar/ReverseRegistrar.hyp` inherits `Controllable` once. Its `Ownable(addr).owner()` interface check remains.
+
+## QRL 2.0 mapping getter safety
+
+The upstream public mappings `Controllable.controllers`, `Root.locked`, and `ResolverBase.recordVersions` use private backing mappings plus explicit typed getters. Their external names, parameter types, return types, selectors, and storage slots remain unchanged.
+
+This source-level divergence preserves complete native 64-byte `address` and left-aligned `bytes32` mapping keys. Legacy Hyperion generated mapping getters clean these keys through a 256-bit path on the 512-bit QRVM. `ReverseRegistrar` calls `controllers(msg.sender)`, and `QRLPublicResolver` calls `recordVersions(node)` to use the explicit accessors internally. Native semantic regressions exercise paired alias-shaped keys under default and optimized legacy and via-IR codegen.
 
 ## Registry
 

@@ -7,13 +7,13 @@ import "../openzeppelin/access/Ownable.hyp";
 // delegating to OZ v5 Ownable(msg.sender). Upstream was written against
 // OZ v4 which had a no-arg Ownable. See vendored/DIFFS.md.
 contract Controllable is Ownable {
-    mapping(address => bool) public controllers;
+    mapping(address => bool) private _controllers;
 
     event ControllerChanged(address indexed controller, bool enabled);
 
     modifier onlyController() {
         require(
-            controllers[msg.sender],
+            _controllers[msg.sender],
             "Controllable: Caller is not a controller"
         );
         _;
@@ -21,8 +21,14 @@ contract Controllable is Ownable {
 
     constructor() Ownable(msg.sender) {}
 
+    /// @notice Returns whether an account is an enabled controller.
+    /// @dev Explicit access preserves the full native 64-byte address key.
+    function controllers(address controller) public view returns (bool) {
+        return _controllers[controller];
+    }
+
     function setController(address controller, bool enabled) public onlyOwner {
-        controllers[controller] = enabled;
+        _controllers[controller] = enabled;
         emit ControllerChanged(controller, enabled);
     }
 }

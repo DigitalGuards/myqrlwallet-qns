@@ -5,8 +5,9 @@
   "description": "QRL Name Service, post-quantum port of ENS to QRL Zond",
   "scripts": {
     "compile": "node scripts/compile-hyperion.js",
-    "test": "npm run compile && npm run test:scripts && npm run sdk:typecheck && npm run sdk:test",
+    "test": "npm run compile && npm run test:semantic && npm run test:scripts && npm run sdk:typecheck && npm run sdk:test",
     "test:scripts": "node --test test/scripts/*.test.js",
+    "test:semantic": "node scripts/run-hyperion-semantic.js",
     "test:behavior": "npm run sdk:build && node --test test/behavior/*.test.js",
     "compile:hyperion": "node scripts/compile-hyperion.js",
     "build:local-network": "./scripts/build-local-node-image.sh && ./scripts/build-local-qrysm-images.sh",

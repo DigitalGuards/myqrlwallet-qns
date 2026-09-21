@@ -2,8 +2,16 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const MANIFEST_SCHEMA_VERSION = 2;
+const MANIFEST_SCHEMA_VERSION = 3;
 const QRL2_PRECOMPILE_SET = "qrl2-pq-v1";
+const HYPERION_CODEGEN_MODE = "via-ir";
+const DEFAULT_TOOLCHAIN_CONFIG_PATH = path.resolve(
+    __dirname,
+    "..",
+    "..",
+    "config",
+    "hyperion-toolchain.json"
+);
 const EXPECTED_TARGET = Object.freeze({
     name: QRL2_PRECOMPILE_SET,
     activation: "genesis",
@@ -18,6 +26,46 @@ function sha256Bytes(value) {
 
 function sha256File(filePath) {
     return sha256Bytes(fs.readFileSync(filePath));
+}
+
+function readHyperionToolchain(configPath = DEFAULT_TOOLCHAIN_CONFIG_PATH) {
+    let toolchain;
+    try {
+        toolchain = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    } catch (error) {
+        throw new Error(`Unable to read Hyperion toolchain config ${configPath}: ${error.message}`);
+    }
+    if (!/^[0-9a-f]{40}$/.test(toolchain?.hyperionCommit || "")) {
+        throw new Error("Hyperion toolchain config has an invalid source commit");
+    }
+    if (
+        typeof toolchain?.compilerVersion !== "string" ||
+        toolchain.compilerVersion.trim() !== toolchain.compilerVersion ||
+        toolchain.compilerVersion.length === 0
+    ) {
+        throw new Error("Hyperion toolchain config has an invalid compiler version");
+    }
+    if (!/^[0-9a-f]{64}$/.test(toolchain?.compilerSha256 || "")) {
+        throw new Error("Hyperion toolchain config has an invalid compiler SHA-256");
+    }
+    return toolchain;
+}
+
+function verifyPinnedCompiler({ compilerPath, compilerVersion, toolchain }) {
+    if (compilerVersion !== toolchain.compilerVersion) {
+        throw new Error(
+            `Unreviewed Hyperion compiler version. Expected ${toolchain.compilerVersion}, ` +
+                `received ${compilerVersion}.`
+        );
+    }
+    const compilerSha256 = sha256File(compilerPath);
+    if (compilerSha256 !== toolchain.compilerSha256) {
+        throw new Error(
+            `Unreviewed Hyperion compiler binary. Expected SHA-256 ` +
+                `${toolchain.compilerSha256}, received ${compilerSha256}.`
+        );
+    }
+    return compilerSha256;
 }
 
 function listHyperionSources(rootDir) {
@@ -125,13 +173,35 @@ function validateTarget(target) {
     }
 }
 
+function compilerCodegenArgs(codegenMode) {
+    if (codegenMode !== HYPERION_CODEGEN_MODE) {
+        throw new Error(`Unsupported Hyperion codegen mode: ${String(codegenMode)}`);
+    }
+    return ["--via-ir"];
+}
+
+function validateCompilerSettings(settings) {
+    if (
+        settings?.optimizer !== true ||
+        settings?.optimizerRuns !== 200 ||
+        settings?.codegenMode !== HYPERION_CODEGEN_MODE ||
+        settings?.viaIR !== true
+    ) {
+        throw new Error(
+            `Artifact manifest must use Hyperion ${HYPERION_CODEGEN_MODE} codegen`
+        );
+    }
+}
+
 function createArtifactManifest({
     compilerPath,
     compilerVersion,
     hyperionRoot,
     artifactsDir,
     contracts,
+    codegenMode,
 }) {
+    compilerCodegenArgs(codegenMode);
     const resolvedCompilerPath = fs.realpathSync(compilerPath);
     const entries = contracts.map((entry) => {
         validateArtifactFileName(entry.abiFile, ".abi");
@@ -158,13 +228,19 @@ function createArtifactManifest({
         settings: {
             optimizer: true,
             optimizerRuns: 200,
+            codegenMode,
+            viaIR: true,
         },
         generatedAt: new Date().toISOString(),
         contracts: entries,
     };
 }
 
-function verifyArtifactManifest({ hyperionRoot, artifactsDir }) {
+function verifyArtifactManifest({
+    hyperionRoot,
+    artifactsDir,
+    toolchainConfigPath = DEFAULT_TOOLCHAIN_CONFIG_PATH,
+}) {
     const manifestPath = path.join(artifactsDir, "manifest.json");
     if (!fs.existsSync(manifestPath)) {
         throw new Error(`Hyperion artifact manifest missing: ${manifestPath}`);
@@ -176,11 +252,19 @@ function verifyArtifactManifest({ hyperionRoot, artifactsDir }) {
         );
     }
     validateTarget(manifest.target);
+    validateCompilerSettings(manifest.settings);
     if (!manifest.compiler || typeof manifest.compiler.path !== "string") {
         throw new Error("Artifact manifest is missing compiler provenance");
     }
     if (!manifest.compiler.version || manifest.compiler.version === "unknown") {
         throw new Error("Artifact manifest has an unknown compiler version");
+    }
+    const toolchain = readHyperionToolchain(toolchainConfigPath);
+    if (manifest.compiler.version !== toolchain.compilerVersion) {
+        throw new Error("Artifact manifest compiler version is not the reviewed QNS toolchain");
+    }
+    if (manifest.compiler.sha256 !== toolchain.compilerSha256) {
+        throw new Error("Artifact manifest compiler binary is not the reviewed QNS toolchain");
     }
     if (!fs.existsSync(manifest.compiler.path)) {
         throw new Error(`Manifest compiler is unavailable: ${manifest.compiler.path}`);
@@ -239,14 +323,19 @@ function validateDeploymentTarget(config) {
 }
 
 module.exports = {
+    DEFAULT_TOOLCHAIN_CONFIG_PATH,
     EXPECTED_TARGET,
+    HYPERION_CODEGEN_MODE,
     MANIFEST_SCHEMA_VERSION,
     QRL2_PRECOMPILE_SET,
+    compilerCodegenArgs,
     createArtifactManifest,
     hashHyperionSourceTree,
     parseCompilerVersion,
+    readHyperionToolchain,
     resolveCompilerPath,
     sha256File,
     validateDeploymentTarget,
+    verifyPinnedCompiler,
     verifyArtifactManifest,
 };

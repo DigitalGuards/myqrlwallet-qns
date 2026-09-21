@@ -15,6 +15,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { Web3 } = require("@theqrl/web3");
 const { loadDeployerFromEnvironment } = require("./lib/loadDeployer");
+const { assertNetworkIdentity } = require("./lib/networkIdentity");
 
 const repoRoot = path.join(__dirname, "..");
 const configPath = process.env.QNS_CONFIG
@@ -22,6 +23,7 @@ const configPath = process.env.QNS_CONFIG
     : path.join(repoRoot, "config", "local-qip55.json");
 const artifactsDir = path.join(repoRoot, "build", "hyperion");
 const sdkDistDir = path.join(repoRoot, "sdk", "dist");
+let verifyNetwork;
 
 function loadJson(p) {
     return JSON.parse(fs.readFileSync(p, "utf8"));
@@ -38,6 +40,7 @@ async function sendTx(web3, contract, method, account, label) {
     const data = method.encodeABI();
     const gas = await method.estimateGas({ from: account.address });
     const tx = await web3.qrl.sendTransaction({
+        chainId: await verifyNetwork(),
         from: account.address,
         to: contract.options.address,
         data,
@@ -118,7 +121,8 @@ async function main() {
     console.log(`FIFS:       ${config.contracts.FIFSQRLRegistrar}`);
 
     const web3 = new Web3(config.rpcUrl);
-    const chainId = await web3.qrl.getChainId();
+    verifyNetwork = () => assertNetworkIdentity(web3, config);
+    const chainId = await verifyNetwork();
     if (Number(chainId) !== config.chainId) {
         throw new Error(`chainId mismatch: expected ${config.chainId}, got ${chainId}`);
     }

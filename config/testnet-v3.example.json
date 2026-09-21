@@ -1,0 +1,16 @@
+{
+  "network": "testnet-v3-private",
+  "chainId": 3151909,
+  "genesisHash": "0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4",
+  "rpcUrl": "https://qrlwallet.com/api/qrl-rpc/testnet",
+  "tld": "qrl",
+  "qrl2PrecompileSet": "qrl2-pq-v1",
+  "contracts": {
+    "QNSRegistry": null,
+    "Root": null,
+    "FIFSQRLRegistrar": null,
+    "ReverseRegistrar": null,
+    "QRLPublicResolver": null,
+    "QRLSignatureVerifier": null
+  }
+}
