@@ -14,8 +14,8 @@ const LABEL_RE = /^[a-z0-9-]+$/;
  * This is a strict subset of ENSIP-15: ASCII uppercase letters fold to
  * lowercase, and every label must then match `[a-z0-9-]+`. Anything else
  * (Unicode, whitespace, underscores, empty labels, leading or trailing
- * dots) raises `QnsNameError` instead of silently producing a different
- * namehash. Full UTS-46 processing can widen this later without changing
+ * dots) raises `QnsNameError` before namehash computation.
+ * Full UTS-46 processing can widen this later without changing
  * the result for names this profile accepts.
  *
  * The empty string is the ENS root and passes through unchanged.
@@ -24,7 +24,7 @@ export function normalize(name: string): string {
   if (name === "") return "";
   let lowered = "";
   for (const ch of name) {
-    const code = ch.codePointAt(0)!;
+    const code = ch.charCodeAt(0);
     lowered += code >= 0x41 && code <= 0x5a ? String.fromCharCode(code + 32) : ch;
   }
   const labels = lowered.split(".");
@@ -39,9 +39,7 @@ export function normalize(name: string): string {
       );
     }
     if (/^..--/.test(label)) {
-      throw new QnsNameError(
-        `reserved double-hyphen pattern in label "${label}"`,
-      );
+      throw new QnsNameError(`reserved double-hyphen pattern in label "${label}"`);
     }
   }
   return labels.join(".");

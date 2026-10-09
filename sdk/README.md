@@ -41,8 +41,24 @@ The canonical QNS context is `QNS-SIGN-v1`.
 ## Development
 
 ```bash
-npm install
+npm ci
+npm run format:check
+npm run lint
 npm run typecheck
 npm test
 npm run build
 ```
+
+`npm run typecheck` runs formatting and type-aware ESLint checks through
+`pretypecheck`, then checks production code and tests. The existing SDK CI job
+calls this command, so all three checks are required in CI.
+
+Production TypeScript uses the strict compiler options and the
+`strict-type-checked` ESLint rules. Type assertions, explicit `any`, non-null
+assertions, TypeScript directives, and inline lint overrides fail the checks.
+Const assertions are allowed. The Connect composition test has a scoped
+type-assertion override to mock private transport state.
+
+Provider responses enter as `unknown` and pass a runtime hex-byte guard before
+ABI decoding. Malformed responses throw `TypeError` without coercing the returned
+value to a string.

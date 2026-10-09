@@ -13,9 +13,7 @@ describe("normalize", () => {
   it("folds ASCII uppercase so case variants share one namehash", () => {
     expect(normalize("ALICE.qrl")).toBe("alice.qrl");
     expect(normalize("Alice.QRL")).toBe("alice.qrl");
-    expect(namehash(normalize("ALICE.qrl"))).toEqual(
-      namehash(normalize("alice.qrl")),
-    );
+    expect(namehash(normalize("ALICE.qrl"))).toEqual(namehash(normalize("alice.qrl")));
   });
 
   it("rejects empty labels and dot edges", () => {
