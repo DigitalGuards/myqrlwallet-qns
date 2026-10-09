@@ -76,12 +76,7 @@ describe("QNS ML-DSA helpers", () => {
     const signature = new Uint8Array(MLDSA87_SIGNATURE_BYTES);
     const publicKey = new Uint8Array(MLDSA87_PUBLIC_KEY_BYTES);
 
-    const empty = encodeMLDSA87VerifyInput(
-      digest,
-      signature,
-      publicKey,
-      new Uint8Array(0),
-    );
+    const empty = encodeMLDSA87VerifyInput(digest, signature, publicKey, new Uint8Array(0));
     expect(empty.length).toBe(64 + 2592 + 4627 + 1);
     expect(empty[empty.length - 1]).toBe(0);
 

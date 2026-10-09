@@ -11,7 +11,10 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "pretypecheck": "npm run format:check && npm run lint",
+    "typecheck": "tsc --noEmit -p tsconfig.eslint.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -28,9 +31,15 @@
     "@noble/hashes": "^1.4.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@qrlwallet/connect": "5.0.1",
+    "@types/node": "^20.19.43",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.9",
     "typescript": "^5.4.0",
-    "vitest": "^4.1.11",
-    "@qrlwallet/connect": "5.0.1"
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^4.1.11"
   },
   "peerDependencies": {
     "@qrlwallet/connect": ">=5.0.1 <6.0.0",

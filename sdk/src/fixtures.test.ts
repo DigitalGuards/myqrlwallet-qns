@@ -11,9 +11,7 @@ const hex = (bytes: Uint8Array): string =>
 
 describe("shared known-answer vectors", () => {
   it("pins the reverse-label encoding", () => {
-    expect(sha3HexAddress(vectors.reverse.address)).toBe(
-      vectors.reverse.sha3HexAddress,
-    );
+    expect(sha3HexAddress(vectors.reverse.address)).toBe(vectors.reverse.sha3HexAddress);
     expect(reverseNodeFor(vectors.reverse.address)).toBe(vectors.reverse.node);
   });
 
@@ -25,19 +23,10 @@ describe("shared known-answer vectors", () => {
 
   it("pins the ML-DSA-87 precompile frame layout", () => {
     const digest = new Uint8Array(64).fill(vectors.mldsaFrame.digestFill);
-    const publicKey = new Uint8Array(2592).fill(
-      vectors.mldsaFrame.publicKeyFill,
-    );
-    const signature = new Uint8Array(4627).fill(
-      vectors.mldsaFrame.signatureFill,
-    );
+    const publicKey = new Uint8Array(2592).fill(vectors.mldsaFrame.publicKeyFill);
+    const signature = new Uint8Array(4627).fill(vectors.mldsaFrame.signatureFill);
     const context = new TextEncoder().encode(vectors.mldsaFrame.context);
-    const frame = encodeMLDSA87VerifyInput(
-      digest,
-      signature,
-      publicKey,
-      context,
-    );
+    const frame = encodeMLDSA87VerifyInput(digest, signature, publicKey, context);
     expect(frame.length).toBe(vectors.mldsaFrame.totalLength);
     expect(hex(keccak_256(frame))).toBe(vectors.mldsaFrame.keccak256);
   });

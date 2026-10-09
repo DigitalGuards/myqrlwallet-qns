@@ -1,4 +1,5 @@
 import { keccak_256 } from "@noble/hashes/sha3";
+import { isHexBytes } from "./guards.js";
 import { namehash, nodeToHex } from "./namehash.js";
 import { normalize, QnsNameError } from "./normalize.js";
 
@@ -29,7 +30,7 @@ export interface QnsConfig {
 function selector(sig: string): string {
   const hash = keccak_256(utf8.encode(sig));
   let out = "0x";
-  for (let i = 0; i < 4; i++) out += hash[i]!.toString(16).padStart(2, "0");
+  for (const byte of hash.subarray(0, 4)) out += byte.toString(16).padStart(2, "0");
   return out;
 }
 
@@ -38,8 +39,7 @@ const SELECTOR_ADDR = selector("addr(bytes32)");
 const SELECTOR_NAME = selector("name(bytes32)");
 
 /// namehash("addr.reverse"), the ENSIP-19 per-chain reverse namespace root.
-const ADDR_REVERSE_NODE =
-  "0x91d1777781884d03a6757a803996e38de2a42967fb37eeaca72729271025a9e2";
+const ADDR_REVERSE_NODE = "0x91d1777781884d03a6757a803996e38de2a42967fb37eeaca72729271025a9e2";
 
 function bytes32Arg(hex: string): string {
   if (!hex.startsWith("0x") || hex.length !== 66) {
@@ -48,17 +48,13 @@ function bytes32Arg(hex: string): string {
   return hex.slice(2) + "0".repeat(64);
 }
 
-async function qrlCall(
-  provider: RpcProvider,
-  to: string,
-  data: string,
-): Promise<string> {
-  const result = await provider.request({
+async function qrlCall(provider: RpcProvider, to: string, data: string): Promise<string> {
+  const result: unknown = await provider.request({
     method: "qrl_call",
     params: [{ to, data }, "latest"],
   });
-  if (typeof result !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/.test(result)) {
-    throw new Error(`unexpected qrl_call result: ${String(result)}`);
+  if (!isHexBytes(result)) {
+    throw new TypeError("unexpected qrl_call result: expected a 0x-prefixed hex byte string");
   }
   return result;
 }
@@ -164,10 +160,7 @@ export function reverseNodeFor(addr: string): string {
  * Look up the resolver address for a given namehash, via the registry.
  * Returns `null` if no resolver is set.
  */
-export async function getResolver(
-  name: string,
-  config: QnsConfig,
-): Promise<string | null> {
+export async function getResolver(name: string, config: QnsConfig): Promise<string | null> {
   const node = nodeToHex(namehash(normalize(name)));
   const data = SELECTOR_RESOLVER + bytes32Arg(node);
   const result = await qrlCall(config.provider, config.registry, data);
@@ -184,10 +177,7 @@ export async function getResolver(
  *
  * Throws on RPC failures.
  */
-export async function resolveName(
-  name: string,
-  config: QnsConfig,
-): Promise<string | null> {
+export async function resolveName(name: string, config: QnsConfig): Promise<string | null> {
   const resolver = await getResolver(name, config);
   if (!resolver) return null;
 
@@ -201,10 +191,7 @@ export async function resolveName(
 /**
  * Compatibility alias for `resolveName`.
  */
-export async function resolveLegacyAddr(
-  name: string,
-  config: QnsConfig,
-): Promise<string | null> {
+export async function resolveLegacyAddr(name: string, config: QnsConfig): Promise<string | null> {
   return resolveName(name, config);
 }
 
@@ -216,18 +203,11 @@ export async function resolveLegacyAddr(
  * should re-resolve and check equality if trust is required). Forward-
  * confirm helper lives at `verifyReverse`.
  */
-export async function lookupAddress(
-  addr: string,
-  config: QnsConfig,
-): Promise<string | null> {
+export async function lookupAddress(addr: string, config: QnsConfig): Promise<string | null> {
   const node = reverseNodeFor(addr);
 
   const resolverData = SELECTOR_RESOLVER + bytes32Arg(node);
-  const resolverResult = await qrlCall(
-    config.provider,
-    config.registry,
-    resolverData,
-  );
+  const resolverResult = await qrlCall(config.provider, config.registry, resolverData);
   const resolver = decodeAddress(resolverResult);
   if (isZeroAddr(resolver)) return null;
 
@@ -244,10 +224,7 @@ export async function lookupAddress(
  * Returns null when no reverse is set, or the name doesn't forward-resolve
  * to the expected address.
  */
-export async function verifyReverse(
-  addr: string,
-  config: QnsConfig,
-): Promise<string | null> {
+export async function verifyReverse(addr: string, config: QnsConfig): Promise<string | null> {
   const name = await lookupAddress(addr, config);
   if (!name) return null;
   let forwardAddr: string | null;

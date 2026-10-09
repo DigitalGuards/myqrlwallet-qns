@@ -21,8 +21,7 @@ export function namehash(name: string): Uint8Array {
   if (name === "") return EMPTY_NODE;
   const labels = name.split(".");
   let node: Uint8Array = EMPTY_NODE;
-  for (let i = labels.length - 1; i >= 0; i--) {
-    const label = labels[i]!;
+  for (const label of labels.reverse()) {
     const labelHash: Uint8Array = keccak_256(utf8.encode(label));
     node = keccak_256(concatBytes(node, labelHash));
   }
