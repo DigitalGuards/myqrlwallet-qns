@@ -931,7 +931,7 @@ export function App({
                   <button
                     className="text-button"
                     onClick={() => {
-                      void controller.disconnect();
+                      void controller.reconnect();
                     }}
                   >
                     Reconnect wallet
