@@ -43,6 +43,90 @@ class RecoveryChain extends MockChain {
 }
 
 describe("transaction recovery", () => {
+  it.each([false, true])(
+    "preserves submitted identity across receipt errors and retries (nonce=%s)",
+    async (knownNonce) => {
+      class ReceiptFailure extends RecoveryChain {
+        failReceipt = true;
+        override request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
+          if (this.failReceipt && args.method === "qrl_getTransactionReceipt")
+            return Promise.reject(new Error("Receipt RPC timed out"));
+          return super.request(args);
+        }
+      }
+      const provider = new ReceiptFailure();
+      provider.mined = false;
+      provider.confirmedNonce = 7n;
+      const original = Object.freeze({
+        step: "register",
+        status: "unconfirmed",
+        hash,
+        requestId: "original-request",
+        ...(knownNonce ? { nonce: "0x7" } : {}),
+      } as const);
+      const before = { ...original };
+      await expect(
+        checkRegistrationTransaction("alice", ACCOUNT, original, { config, provider }),
+      ).rejects.toThrow("Receipt RPC timed out");
+      expect(original).toEqual(before);
+      provider.failReceipt = false;
+      expect(
+        await checkRegistrationTransaction("alice", ACCOUNT, original, { config, provider }),
+      ).toBe("pending");
+      expect(original).toEqual(before);
+      provider.confirmedNonce = 8n;
+      expect(
+        await checkRegistrationTransaction("alice", ACCOUNT, original, { config, provider }),
+      ).toBe("replaced");
+      expect(original).toEqual(before);
+      expect(provider.sent).toHaveLength(0);
+    },
+  );
+
+  it("retains the sent hash and discovered nonce when a later transaction lookup changes", async () => {
+    const provider = new MockChain();
+    provider.confirmedNonce = 7n;
+    provider.receiptPending = true;
+    const updates: TransactionUpdate[] = [];
+    await expect(
+      registerName("alice", {
+        config,
+        provider,
+        wallet: provider,
+        account: ACCOUNT,
+        transport: "extension",
+        primary: false,
+        pollIntervalMs: 0,
+        onUpdate(update) {
+          updates.push(update);
+          if (update.status === "pending" && update.nonce !== undefined) {
+            const tx = provider.sent[0];
+            if (!tx) throw new Error("Missing submitted transaction");
+            tx.nonce = "0x8";
+            provider.receiptPending = false;
+          }
+        },
+      }),
+    ).rejects.toThrow(TransactionMismatchError);
+    const submittedHash = `0x${"1".padStart(64, "0")}`;
+    expect(
+      updates
+        .filter((update) => update.hash !== undefined)
+        .every((update) => update.hash === submittedHash),
+    ).toBe(true);
+    expect(
+      updates
+        .filter((update) => update.nonce !== undefined)
+        .every((update) => update.nonce === "0x7"),
+    ).toBe(true);
+    expect(updates.at(-1)).toMatchObject({
+      hash: submittedHash,
+      nonce: "0x7",
+      status: "mismatched",
+    });
+    expect(provider.sent).toHaveLength(1);
+  });
+
   it("detects a replaced nonce without a receipt and keeps an unused nonce pending", async () => {
     const provider = new RecoveryChain();
     provider.mined = false;

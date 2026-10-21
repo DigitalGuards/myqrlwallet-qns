@@ -232,6 +232,11 @@ export function App({
     pendingRef.current = claim;
     setPendingState({ config, claim });
   }
+  function savedClaim(account: string): PendingClaim | null {
+    return isCurrentContext() && pendingRef.current?.account === account
+      ? pendingRef.current
+      : readPendingClaim(config, account);
+  }
   const [checkingPending, setCheckingPending] = useState(false);
   const pendingCheck = useRef<{ node: string; requestId: string } | null>(null);
   const [recoveryHash, setRecoveryHash] = useState("");
@@ -286,18 +291,18 @@ export function App({
     }
     const scope = claimScope(pending);
     if (response.rejected) {
-      recordUpdate(scope, { ...pending.update, status: "failed" }, pending.primary);
+      recordSubmission(scope, { ...pending.update, status: "failed" }, pending.primary);
       claimMessage(scope, "Request declined in your wallet. You can continue when ready.");
     } else if (response.hash) {
-      const next: PendingClaim = {
-        ...pending,
-        update: {
+      recordSubmission(
+        scope,
+        {
           ...pending.update,
           hash: response.hash,
           status: pending.update.status === "approval" ? "unconfirmed" : pending.update.status,
         },
-      };
-      recordUpdate(scope, next.update, next.primary);
+        pending.primary,
+      );
     }
     void refreshName();
     controller.clearLateTransaction();
@@ -384,9 +389,46 @@ export function App({
       setRefresh((value) => value + 1);
     }
   }
-  function recordUpdate(scope: ClaimScope, update: TransactionUpdate, makePrimary = primary): void {
-    const { name, account, attemptId } = scope;
-    const saved = readPendingClaim(config, account);
+  // Identity enters through the send response, including a delayed response to that request.
+  function recordSubmission(
+    scope: ClaimScope,
+    update: TransactionUpdate,
+    makePrimary = primary,
+  ): void {
+    const saved = savedClaim(scope.account);
+    if (saved && (!sameClaimRequest(claimScope(saved), scope) || saved.update.step !== update.step))
+      return;
+    const original = saved;
+    recordClaim(scope, {
+      name: scope.name,
+      account: scope.account,
+      primary: makePrimary,
+      ...(scope.attemptId ? { attemptId: scope.attemptId } : {}),
+      ...original,
+      update: {
+        ...update,
+        ...(original?.update.hash ? { hash: original.update.hash } : {}),
+        ...(original?.update.nonce !== undefined ? { nonce: original.update.nonce } : {}),
+        ...(original?.update.requestId !== undefined
+          ? { requestId: original.update.requestId }
+          : {}),
+      },
+    });
+  }
+  function recordUpdate(
+    scope: ClaimScope,
+    outcome: Pick<TransactionUpdate, "status" | "message">,
+  ): void {
+    const saved = savedClaim(scope.account);
+    if (!saved || !sameClaimRequest(claimScope(saved), scope)) return;
+    const update = { ...saved.update, status: outcome.status };
+    delete update.message;
+    if (outcome.message !== undefined) update.message = outcome.message;
+    recordClaim(scope, { ...saved, update });
+  }
+  function recordClaim(scope: ClaimScope, next: PendingClaim): void {
+    const { name, account, update } = next;
+    const saved = savedClaim(account);
     if (saved && !sameClaimRequest(claimScope(saved), scope)) return;
     const visible = isCurrentContext() && controller.getSnapshot().account === account;
     if (activeClaim(scope))
@@ -406,13 +448,6 @@ export function App({
       if (visible) setRefresh((value) => value + 1);
     }
     if (transactionOutcomes[update.status].recovery) {
-      const next = {
-        name,
-        account,
-        update,
-        primary: makePrimary,
-        ...(attemptId ? { attemptId } : {}),
-      };
       if (visible) setPending(next);
       savePendingClaim(config, next);
     } else if (
@@ -470,9 +505,9 @@ export function App({
         signal: abort.signal,
         onUpdate: (update) => {
           // Preserve the original account's submitted operation after a wallet switch.
-          const saved = readPendingClaim(config, account);
+          const saved = savedClaim(account);
           if (abort.signal.aborted && (!saved || saved.attemptId !== attemptId)) return;
-          recordUpdate(scope, update, makePrimary);
+          recordSubmission(scope, update, makePrimary);
         },
       });
       abort.signal.throwIfAborted();
@@ -521,21 +556,21 @@ export function App({
       controller.getSnapshot().revision === revision &&
       pendingRef.current !== null &&
       sameClaimRequest(claimScope(pendingRef.current), scope) &&
-      pendingRef.current.update.hash === saved.update.hash;
+      pendingRef.current.update.hash === saved.update.hash &&
+      pendingRef.current.update.nonce === saved.update.nonce &&
+      pendingRef.current.trackedHash === saved.trackedHash;
     setCheckingPending(true);
     setClaimError(null);
     setInput(saved.name);
     let result: RecoveryCheck | null = null;
+    const trackedChecks = new Map<string, RecoveryCheck>();
     let records: RecoveryRecords | null = null;
     const decide = () =>
       decideRecovery(
         saved,
         {
-          original: saved.update.hash ? null : result,
-          tracked:
-            saved.update.hash && result
-              ? new Map([[saved.update.hash.toLowerCase(), result]])
-              : new Map(),
+          original: result,
+          tracked: trackedChecks,
         },
         stateOnly,
         records,
@@ -550,32 +585,49 @@ export function App({
       let decision = decide();
       let appliedUpdate: TransactionUpdate | undefined;
       if (decision.next === "check") {
-        try {
-          result = {
-            status: await checkRegistrationTransaction(
-              saved.name,
-              saved.account,
-              saved.update,
-              context,
-            ),
-          };
-        } catch (error) {
-          result = {
-            status:
-              error instanceof TransactionMismatchError
-                ? "mismatched"
-                : error instanceof RevertedTransactionError
-                  ? "reverted"
-                  : "error",
-            message: errorMessage(error),
-          };
+        const checkTransaction = async (update: TransactionUpdate): Promise<RecoveryCheck> => {
+          try {
+            return {
+              status: await checkRegistrationTransaction(
+                saved.name,
+                saved.account,
+                update,
+                context,
+              ),
+            };
+          } catch (error) {
+            return {
+              status:
+                error instanceof TransactionMismatchError
+                  ? "mismatched"
+                  : error instanceof RevertedTransactionError
+                    ? "reverted"
+                    : "error",
+              message: errorMessage(error),
+            };
+          }
+        };
+        const trackedHash = saved.trackedHash;
+        if (trackedHash && trackedHash.toLowerCase() !== saved.update.hash?.toLowerCase()) {
+          // A separate hash can refresh records. Settlement still requires the original
+          // receipt or proof that its sender's nonce was consumed, checked by the SDK.
+          const trackedResult = await checkTransaction({
+            step: saved.update.step,
+            status: "unconfirmed",
+            hash: trackedHash,
+          });
+          if (!current()) return;
+          trackedChecks.set(trackedHash.toLowerCase(), trackedResult);
+          rememberName(config, saved.name);
+          setRefresh((value) => value + 1);
         }
+        result = await checkTransaction(saved.update);
         if (!current()) return;
         decision = decide();
       }
       if (decision.next === "read") {
         for (const update of decision.updates) {
-          recordUpdate(scope, update, saved.primary);
+          recordUpdate(scope, update);
           appliedUpdate = update;
         }
         try {
@@ -589,11 +641,21 @@ export function App({
         if (!current()) return;
         decision = decide();
       }
-      claimMessage(scope, decision.showFinished ? null : decision.message);
+      const trackedResult = saved.trackedHash
+        ? trackedChecks.get(saved.trackedHash.toLowerCase())
+        : undefined;
+      claimMessage(
+        scope,
+        decision.showFinished
+          ? null
+          : trackedResult && "message" in trackedResult
+            ? `Tracked transaction: ${trackedResult.message}`
+            : decision.message,
+      );
       if (decision.next !== "delete") {
         for (const update of decision.updates)
           if (update.status !== appliedUpdate?.status || update.message !== appliedUpdate.message)
-            recordUpdate(scope, update, saved.primary);
+            recordUpdate(scope, update);
         return;
       }
       const failed = decision.updates.find((update) => update.status === "failed");
@@ -603,7 +665,7 @@ export function App({
         setPrimary(saved.primary ?? false);
       }
       if (failed) {
-        recordUpdate(scope, failed, saved.primary);
+        recordUpdate(scope, failed);
         return;
       }
       rememberName(config, saved.name);
@@ -905,24 +967,33 @@ export function App({
                     Check the pending transaction for {pending.name} before continuing.
                   </Message>
                   {pending.update.hash && (
-                    <>
-                      <a
-                        href={`https://zondscan.com/tx/${pending.update.hash}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        View transaction
-                      </a>
-                      <button
-                        className="secondary mt-4 w-full"
-                        disabled={checkingPending}
-                        onClick={() => {
-                          void recoverPending();
-                        }}
-                      >
-                        {checkingPending ? "Checking..." : "Check confirmation"}
-                      </button>
-                    </>
+                    <a
+                      href={`https://zondscan.com/tx/${pending.update.hash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      View transaction
+                    </a>
+                  )}
+                  {pending.trackedHash && (
+                    <a
+                      href={`https://zondscan.com/tx/${pending.trackedHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      View tracked transaction
+                    </a>
+                  )}
+                  {(pending.update.hash || pending.trackedHash) && (
+                    <button
+                      className="secondary mt-4 w-full"
+                      disabled={checkingPending}
+                      onClick={() => {
+                        void recoverPending();
+                      }}
+                    >
+                      {checkingPending ? "Checking..." : "Check confirmation"}
+                    </button>
                   )}
                   <p className="muted text-sm">
                     You can check the name directly after a cancellation or speed-up, or enter the
@@ -943,20 +1014,9 @@ export function App({
                     className="secondary mt-4 w-full"
                     disabled={checkingPending || !/^0x[0-9a-fA-F]{64}$/.test(recoveryHash)}
                     onClick={() => {
-                      const update: TransactionUpdate = {
-                        ...pending.update,
-                        hash: recoveryHash,
-                        status: "unconfirmed",
-                      };
-                      if (
-                        ["mismatched", "replaced", "incomplete", "verification-failed"].includes(
-                          pending.update.status,
-                        ) &&
-                        pending.update.hash?.toLowerCase() === recoveryHash.toLowerCase()
-                      )
-                        update.status = pending.update.status;
-                      else delete update.message;
-                      recordUpdate(claimScope(pending), update, pending.primary);
+                      const next = { ...pending, trackedHash: recoveryHash };
+                      setPending(next);
+                      savePendingClaim(config, next);
                     }}
                   >
                     Track transaction

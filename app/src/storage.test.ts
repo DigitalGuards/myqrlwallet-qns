@@ -43,3 +43,28 @@ it("recovers legacy records for their owner and retires them on discard", () => 
   savePendingClaim(config, null, ACCOUNT);
   expect(readPendingClaim(config, ACCOUNT)).toBeNull();
 });
+
+it.each([false, true])("stores tracking independently of a submitted hash (known=%s)", (known) => {
+  const hash = `0x${"d".repeat(64)}`;
+  const trackedHash = `0x${"e".repeat(64)}`;
+  const pending = {
+    name: "alice.qrl",
+    account: ACCOUNT,
+    primary: true,
+    attemptId: "original-attempt",
+    update: {
+      step: "primary",
+      status: "unconfirmed",
+      requestId: "original-request",
+      ...(known ? { hash, nonce: "0x7" } : {}),
+    },
+  } as const;
+  savePendingClaim(config, pending);
+  savePendingClaim(config, { ...pending, trackedHash });
+  expect(readPendingClaim(config, ACCOUNT)).toEqual({ ...pending, trackedHash });
+  savePendingClaim(config, { ...pending, trackedHash: hash });
+  expect(readPendingClaim(config, ACCOUNT)?.update).toEqual(pending.update);
+  expect(readPendingClaim(config, ACCOUNT)?.attemptId).toBe(pending.attemptId);
+  savePendingClaim(config, { ...pending, trackedHash: "invalid" });
+  expect(readPendingClaim(config, ACCOUNT)).toEqual(pending);
+});

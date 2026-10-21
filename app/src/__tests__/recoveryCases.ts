@@ -23,14 +23,20 @@ function allSequences(): CheckResult[][] {
   return sequences;
 }
 
+export const trackingModes = ["original", "same hash", "earlier identical calldata"] as const;
+export type TrackingMode = (typeof trackingModes)[number];
 export const recoveryCases = allSequences().flatMap((sequence) =>
-  [false, true].flatMap((tracked) =>
-    [false, true].map((reload) => ({
-      sequence,
-      trace: sequence.join(" / "),
-      tracked,
-      reload,
-    })),
+  trackingModes.flatMap((tracking) =>
+    [false, true].flatMap((receiptLookupFailed) =>
+      [false, true].map((reload) => ({
+        sequence,
+        trace: sequence.join(" / "),
+        tracking,
+        tracked: tracking !== "original",
+        receiptLookupFailed,
+        reload,
+      })),
+    ),
   ),
 );
 
@@ -61,7 +67,12 @@ const sampleSequences = [
   ),
 ];
 const sampleTraces = new Set(sampleSequences.map((sequence) => sequence.join(" / ")));
-export const renderedRecoveryCases = recoveryCases.filter(({ trace }) => sampleTraces.has(trace));
+export const renderedRecoveryCases = recoveryCases.filter(
+  ({ trace, tracking, receiptLookupFailed }) =>
+    tracking === "earlier identical calldata"
+      ? trace === "pending / mismatched / not found / confirmed"
+      : receiptLookupFailed && sampleTraces.has(trace),
+);
 export const renderedRetryCases = retryCases.filter(
   ({ result, previous, tracked, reload }) =>
     tracked === (results.indexOf(result) % 2 === 0) && reload === (previous === "replaced"),

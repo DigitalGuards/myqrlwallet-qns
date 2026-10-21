@@ -283,15 +283,27 @@ it.each(recoveryEntries)("keeps %s recovery pending during a direct state check"
     screen.queryByText("alice.qrl is ready. It resolves to your address and is your primary name."),
   ).toBeNull();
   expect(chain.sent).toHaveLength(1);
-  // The same entry can settle through an exact transaction check.
+  // A saved hash or consumed nonce establishes settlement for the original request.
   chain.receiptPending = false;
   fireEvent.change(screen.getByLabelText("Transaction hash"), { target: { value: hash } });
   fireEvent.click(screen.getByRole("button", { name: "Track transaction" }));
   fireEvent.click(screen.getByRole("button", { name: "Check confirmation" }));
-  await screen.findByText(
-    "alice.qrl is ready. It resolves to your address and is your primary name.",
-  );
-  expect(readPendingClaim(config, ACCOUNT)).toBeNull();
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: "Checking..." })).toBeNull();
+  });
+  if (entry === "hash" || entry === "nonce") {
+    await screen.findByText(
+      "alice.qrl is ready. It resolves to your address and is your primary name.",
+    );
+    expect(readPendingClaim(config, ACCOUNT)).toBeNull();
+  } else {
+    expect(readPendingClaim(config, ACCOUNT)).toEqual({ ...saved, trackedHash: hash });
+    expect(
+      screen.queryByText(
+        "alice.qrl is ready. It resolves to your address and is your primary name.",
+      ),
+    ).toBeNull();
+  }
   expect(chain.sent).toHaveLength(1);
 });
 

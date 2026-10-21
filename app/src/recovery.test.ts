@@ -13,7 +13,9 @@ import {
   results,
   retryCases,
   settles,
+  trackingModes,
   type CheckResult,
+  type TrackingMode,
 } from "./__tests__/recoveryCases";
 
 const hash = `0x${"d".repeat(64)}`;
@@ -50,10 +52,19 @@ function checked(result: CheckResult): RecoveryCheck {
   return { status: result };
 }
 
-function evidence(result: RecoveryCheck | null, tracked: boolean): RecoveryChecks {
+function evidence(
+  result: RecoveryCheck | null,
+  tracked: boolean,
+  tracking: TrackingMode = tracked ? "same hash" : "original",
+): RecoveryChecks {
   return {
-    original: tracked ? null : result,
-    tracked: tracked && result ? new Map([[hash, result]]) : new Map(),
+    original: tracking === "same hash" ? null : result,
+    tracked:
+      tracking === "earlier identical calldata"
+        ? new Map([[otherHash, checked("confirmed")]])
+        : tracked && result
+          ? new Map([[hash, result]])
+          : new Map(),
   };
 }
 
@@ -68,20 +79,22 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-it("enumerates all 6,216 sequence combinations and 48 retries", () => {
-  expect(recoveryCases).toHaveLength(4 * (6 + 6 ** 2 + 6 ** 3 + 6 ** 4));
+it("enumerates all 18,648 sequence combinations and 48 retries", () => {
+  expect(recoveryCases).toHaveLength(12 * (6 + 6 ** 2 + 6 ** 3 + 6 ** 4));
   expect(
     new Set(
       recoveryCases.map(
-        ({ trace, tracked, reload }) => `${trace}:${String(tracked)}:${String(reload)}`,
+        ({ trace, tracking, receiptLookupFailed, reload }) =>
+          `${trace}:${tracking}:${String(receiptLookupFailed)}:${String(reload)}`,
       ),
     ).size,
-  ).toBe(6216);
+  ).toBe(18648);
+  expect(new Set(recoveryCases.map(({ tracking }) => tracking))).toEqual(new Set(trackingModes));
   expect(retryCases).toHaveLength(48);
 });
 
 it("renders every outcome at every reachable step for both hash sources and reload modes", () => {
-  expect(renderedRecoveryCases).toHaveLength(60);
+  expect(renderedRecoveryCases).toHaveLength(64);
   const covered = new Set<string>();
   for (const { sequence, tracked, reload } of renderedRecoveryCases) {
     for (const [step, result] of sequence.entries()) {
@@ -97,9 +110,26 @@ it("renders every outcome at every reachable step for both hash sources and relo
 });
 
 it.each(recoveryCases)(
-  "requires settlement after every check: $trace (tracked=$tracked, reload=$reload)",
-  ({ sequence, tracked, reload }) => {
-    let saved: PendingClaim | null = persist(claim(), reload);
+  "requires original settlement: $trace ($tracking, receiptLookupFailed=$receiptLookupFailed, reload=$reload)",
+  ({ sequence, tracked, tracking, receiptLookupFailed, reload }) => {
+    const original = claim(!receiptLookupFailed);
+    const initial = {
+      ...original,
+      ...(tracked ? { trackedHash: tracking === "same hash" ? hash : otherHash } : {}),
+    };
+    let saved: PendingClaim | null = persist(initial, reload);
+    if (receiptLookupFailed) {
+      const failed = decideRecovery(
+        initial,
+        evidence({ status: "error", message: "Receipt RPC timed out" }, tracked, tracking),
+        false,
+        readyRecords,
+      );
+      expect(failed.pending).toEqual(initial);
+      expect(failed.showFinished).toBe(false);
+      expect(failed.pending?.update.nonce).toBeUndefined();
+      saved = persist(failed.pending, reload);
+    }
     let settled = false;
     let showFinished = false;
     for (const result of sequence) {
@@ -107,7 +137,7 @@ it.each(recoveryCases)(
         const before = structuredClone(saved);
         const decision = decideRecovery(
           saved,
-          evidence(checked(result), tracked),
+          evidence(checked(result), tracked, tracking),
           false,
           readyRecords,
         );
@@ -119,9 +149,9 @@ it.each(recoveryCases)(
         expect(decision.showFinished).toBe(showFinished);
         if (!settled) {
           expect(decision.pending).toEqual({
-            ...claim(),
+            ...initial,
             update: {
-              ...claim().update,
+              ...original.update,
               status: result === "mismatched" ? "mismatched" : "unconfirmed",
             },
           });
@@ -129,7 +159,7 @@ it.each(recoveryCases)(
         }
         if (result === "reverted")
           expect(decision.updates).toEqual([
-            { ...claim().update, status: "failed", message: "Transaction reverted" },
+            { ...original.update, status: "failed", message: "Transaction reverted" },
           ]);
         if (showFinished)
           expect(decision.updates).toEqual(
@@ -137,7 +167,7 @@ it.each(recoveryCases)(
           );
         saved = persist(decision.pending, reload);
         if (reload && saved) {
-          const restored = decideRecovery(saved, evidence(null, tracked));
+          const restored = decideRecovery(saved, evidence(null, tracked, tracking));
           expect(restored.pending).toEqual(saved);
           expect(restored.next).toBe("check");
           expect(restored.showFinished).toBe(false);

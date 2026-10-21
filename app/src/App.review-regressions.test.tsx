@@ -322,9 +322,10 @@ it.each(["Re-check name state", "Discard pending state", "Track transaction"])(
       });
       fireEvent.click(screen.getByRole("button", { name: choice }));
       expect(readPendingClaim(config, ACCOUNT)?.update).toMatchObject({
-        status: "unconfirmed",
-        hash: correctedHash,
+        status: "mismatched",
+        hash: recoveryHash,
       });
+      expect(readPendingClaim(config, ACCOUNT)?.trackedHash).toBe(correctedHash);
       fireEvent.click(screen.getByRole("button", { name: "Check confirmation" }));
     } else fireEvent.click(screen.getByRole("button", { name: choice }));
     await waitFor(() => {

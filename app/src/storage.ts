@@ -35,11 +35,12 @@ export function rememberName(config: NetworkConfig, name: string): void {
 }
 
 export interface PendingClaim {
-  name: string;
-  account: string;
-  update: TransactionUpdate;
-  primary?: boolean;
-  attemptId?: string;
+  readonly name: string;
+  readonly account: string;
+  readonly update: TransactionUpdate;
+  readonly primary?: boolean;
+  readonly attemptId?: string;
+  readonly trackedHash?: string;
 }
 
 function pendingKey(config: NetworkConfig, account: string): string {
@@ -106,6 +107,9 @@ export function readPendingClaim(
       account: canonicalAddress(value.account),
       primary: value.primary === true || step === "primary",
       ...(typeof value.attemptId === "string" ? { attemptId: value.attemptId } : {}),
+      ...(typeof value.trackedHash === "string" && /^0x[0-9a-fA-F]{64}$/.test(value.trackedHash)
+        ? { trackedHash: value.trackedHash }
+        : {}),
       update: {
         step,
         ...(typeof hash === "string" ? { hash } : {}),

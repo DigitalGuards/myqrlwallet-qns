@@ -10,9 +10,11 @@ import {
   renderedRecoveryCases,
   renderedRetryCases,
   type CheckResult,
+  type TrackingMode,
 } from "./__tests__/recoveryCases";
 
 const hash = `0x${"d".repeat(64)}`;
+const earlierHash = `0x${"e".repeat(64)}`;
 const ready = "alice.qrl is ready. It resolves to your address and is your primary name.";
 
 // All RPC is in memory. Earlier transactions have already completed every name record.
@@ -22,6 +24,7 @@ class RecoveryChain extends MockChain {
   nonceConsumed = false;
   failAfterCheck = false;
   recordsUnavailable = false;
+  failReceipt = false;
 
   constructor() {
     super();
@@ -40,6 +43,14 @@ class RecoveryChain extends MockChain {
 
   override request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
     if (args.method === "qrl_getTransactionReceipt") {
+      if (args.params?.[0] === earlierHash)
+        return Promise.resolve({
+          transactionHash: earlierHash,
+          blockHash: `0x${"c".repeat(64)}`,
+          blockNumber: "0x10",
+          status: "0x1",
+        });
+      if (this.failReceipt) return Promise.reject(new Error("Receipt RPC timed out"));
       if (this.result !== "confirmed" && this.result !== "reverted" && this.result !== "mismatched")
         return Promise.resolve(null);
       this.receiptObserved = this.result !== "mismatched";
@@ -52,6 +63,10 @@ class RecoveryChain extends MockChain {
       });
     }
     if (args.method === "qrl_getTransactionByHash") {
+      if (args.params?.[0] === earlierHash) {
+        const tx = registrationTransaction("alice", ACCOUNT, "primary", config);
+        return Promise.resolve({ ...tx, hash: earlierHash, input: tx.data, nonce: "0x6" });
+      }
       if (this.result === "not found") return Promise.resolve(null);
       const tx = registrationTransaction(
         this.result === "mismatched" ? "bob" : "alice",
@@ -91,7 +106,12 @@ async function click(label: string): Promise<void> {
   });
 }
 
-async function start(chain: RecoveryChain, tracked: boolean, knownNonce = false): Promise<void> {
+async function start(
+  chain: RecoveryChain,
+  tracked: boolean,
+  knownNonce = false,
+  tracking: TrackingMode = tracked ? "same hash" : "original",
+): Promise<void> {
   savePendingClaim(config, {
     name: "alice.qrl",
     account: ACCOUNT,
@@ -102,12 +122,14 @@ async function start(chain: RecoveryChain, tracked: boolean, knownNonce = false)
       status: "unconfirmed",
       requestId: "claim-request",
       ...(knownNonce ? { nonce: "0x7" } : {}),
-      ...(tracked ? {} : { hash }),
+      hash,
     },
   });
   await mount(chain);
   if (tracked) {
-    fireEvent.change(screen.getByLabelText("Transaction hash"), { target: { value: hash } });
+    fireEvent.change(screen.getByLabelText("Transaction hash"), {
+      target: { value: tracking === "earlier identical calldata" ? earlierHash : hash },
+    });
     await click("Track transaction");
   }
 }
@@ -118,10 +140,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 it.each(renderedRecoveryCases)(
-  "requires settlement after every check: $trace (tracked=$tracked, reload=$reload)",
-  async ({ sequence, tracked, reload }) => {
+  "requires original settlement: $trace ($tracking, receiptLookupFailed=$receiptLookupFailed, reload=$reload)",
+  async ({ sequence, tracked, tracking, receiptLookupFailed, reload }) => {
     const chain = new RecoveryChain();
-    await start(chain, tracked);
+    await start(chain, tracked, !receiptLookupFailed, tracking);
+    if (receiptLookupFailed) {
+      const before = readPendingClaim(config, ACCOUNT);
+      chain.failReceipt = true;
+      await click("Check confirmation");
+      expect(readPendingClaim(config, ACCOUNT)).toEqual(before);
+      expect(readPendingClaim(config, ACCOUNT)?.update.nonce).toBeUndefined();
+      chain.failReceipt = false;
+    }
     expect(readPendingClaim(config, ACCOUNT)).not.toBeNull();
     expect(screen.queryByText(ready)).toBeNull();
 
@@ -142,8 +172,12 @@ it.each(renderedRecoveryCases)(
           status: result === "mismatched" ? "mismatched" : "unconfirmed",
           requestId: "claim-request",
           hash,
+          ...(!receiptLookupFailed ? { nonce: "0x7" } : {}),
         });
         expect(saved?.attemptId).toBe("claim-attempt");
+        expect(saved?.trackedHash).toBe(
+          tracked ? (tracking === "earlier identical calldata" ? earlierHash : hash) : undefined,
+        );
         expect(screen.queryByText(ready)).toBeNull();
       }
       if (before && (result === "confirmed" || result === "replaced"))

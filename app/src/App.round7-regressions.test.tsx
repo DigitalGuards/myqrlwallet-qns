@@ -38,9 +38,13 @@ function seedReady(chain: MockChain) {
   chain.primary = parsed.name;
 }
 
-it.each([false, true])(
-  "retains recovery after a mismatched hash disappears (reload=%s)",
-  async (reload) => {
+it.each(
+  [false, true].flatMap((reload) =>
+    [false, true].map((originalKnown) => ({ reload, originalKnown })),
+  ),
+)(
+  "retains recovery after a mismatched hash disappears (reload=$reload, originalKnown=$originalKnown)",
+  async ({ reload, originalKnown }) => {
     class DroppedHash extends MockChain {
       dropped: string | null = null;
       override request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
@@ -77,22 +81,36 @@ it.each([false, true])(
       name: "alice.qrl",
       account: ACCOUNT,
       primary: true,
-      update: { step: "primary", status: "unconfirmed", requestId: "alice-request" },
+      update: {
+        step: "primary",
+        status: "unconfirmed",
+        requestId: "alice-request",
+        ...(originalKnown ? { hash: unrelated } : {}),
+      },
     });
     await mount(chain);
     await screen.findByRole("button", { name: "Track transaction" });
     fireEvent.change(screen.getByLabelText("Transaction hash"), { target: { value: unrelated } });
     fireEvent.click(screen.getByRole("button", { name: "Track transaction" }));
     fireEvent.click(await screen.findByRole("button", { name: "Check confirmation" }));
-    await screen.findByText("Transaction does not match", { selector: "dd" });
+    await screen.findByText(/does not match the pending step/, { selector: '[role="alert"]' });
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Checking..." })).toBeNull();
     });
-    expect(readPendingClaim(config, ACCOUNT)?.update.status).toBe("mismatched");
+    expect(readPendingClaim(config, ACCOUNT)?.update.status).toBe(
+      originalKnown ? "mismatched" : "unconfirmed",
+    );
+    expect(readPendingClaim(config, ACCOUNT)?.update.hash).toBe(
+      originalKnown ? unrelated : undefined,
+    );
+    expect(readPendingClaim(config, ACCOUNT)?.trackedHash).toBe(unrelated);
     if (reload) {
       cleanup();
       await mount(chain);
-      await screen.findByText("Transaction does not match", { selector: "dd" });
+      if (originalKnown) await screen.findByText("Transaction does not match", { selector: "dd" });
+      expect(readPendingClaim(config, ACCOUNT)?.update.status).toBe(
+        originalKnown ? "mismatched" : "unconfirmed",
+      );
     }
     chain.dropped = unrelated;
     const saved = readPendingClaim(config, ACCOUNT);

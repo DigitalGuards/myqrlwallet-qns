@@ -7,7 +7,7 @@ export type RecoveryCheck =
 
 export interface RecoveryChecks {
   original: RecoveryCheck | null;
-  // Each entry is the latest result for that hash. Tracking replaces the saved claim's hash.
+  // Only the original hash can supply its receipt. Other hashes have independent outcomes.
   tracked: ReadonlyMap<string, RecoveryCheck>;
 }
 

@@ -131,9 +131,9 @@ export type TransactionStatus =
 export interface TransactionUpdate {
   step: RegistrationStep;
   status: TransactionStatus;
-  hash?: string;
-  nonce?: string;
-  requestId?: string | number;
+  readonly hash?: string;
+  readonly nonce?: string;
+  readonly requestId?: string | number;
   message?: string;
 }
 
@@ -394,7 +394,7 @@ export async function isNonceConsumed(
 export async function checkRegistrationTransaction(
   input: string,
   account: string,
-  update: TransactionUpdate,
+  update: Readonly<TransactionUpdate>,
   context: RegistrationContext,
 ): Promise<"confirmed" | "pending" | "replaced"> {
   await assertNetwork(context.provider, context.config);
