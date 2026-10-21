@@ -1,7 +1,12 @@
-// EIP-6963 discovery and relay lifecycle follow the QuantaPool and QuantaSwap frontends.
-import { QRLConnect, type QRLConnectOptions } from "@qrlwallet/connect";
+// Extension sessions and relay connections follow myqrlwallet-connect.
+import { isCurrentQrlAddress, QRLConnect, type QRLConnectOptions } from "@qrlwallet/connect";
 import { canonicalAddress, type NetworkConfig, type RpcProvider } from "@qns/sdk";
 import { errorMessage, isRecord } from "./rpc";
+import {
+  createExtensionSession,
+  type ExtensionSession,
+  type ExtensionSessionState,
+} from "./extensionSession";
 
 type Handler = (payload?: unknown) => void;
 type WalletEvent =
@@ -61,6 +66,27 @@ export interface WalletState {
   lateTransaction: { id: string | number; hash: string | null; rejected: boolean } | null;
 }
 
+const extensionProviders = new WeakMap<object, WalletProvider>();
+const revocationTimeoutMs = 10_000;
+const revocationTimeoutMessage =
+  "Disconnected on this page. The wallet did not answer; remove this site in the extension if it still shows as connected.";
+
+async function settlesWithinTimeout(work: Promise<unknown>): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(false);
+        }, revocationTimeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Validate announcements before calling page-supplied providers. */
 export function extensionAnnouncement(value: unknown): WalletChoice | null {
   if (!isRecord(value) || !isRecord(value.info) || !isRecord(value.provider)) return null;
@@ -69,10 +95,9 @@ export function extensionAnnouncement(value: unknown): WalletChoice | null {
   if (typeof info.uuid !== "string" || !info.uuid || typeof info.name !== "string") return null;
   const request = provider.request;
   if (typeof request !== "function") return null;
-  return {
-    id: info.rdns,
-    name: info.rdns === "com.qrlwallet.extension" ? "MyQRLWallet Extension" : "QRL Web3 Wallet",
-    provider: {
+  let walletProvider = extensionProviders.get(provider);
+  if (!walletProvider) {
+    walletProvider = {
       async request(args) {
         const result: unknown = Reflect.apply(request, provider, [args]);
         return await result;
@@ -85,7 +110,13 @@ export function extensionAnnouncement(value: unknown): WalletChoice | null {
           if (typeof remove === "function") Reflect.apply(remove, provider, [event, handler]);
         };
       },
-    },
+    };
+    extensionProviders.set(provider, walletProvider);
+  }
+  return {
+    id: info.rdns,
+    name: info.rdns === "com.qrlwallet.extension" ? "MyQRLWallet Extension" : "QRL Web3 Wallet",
+    provider: walletProvider,
   };
 }
 
@@ -104,7 +135,19 @@ export class WalletController {
   };
   private listeners = new Set<() => void>();
   private relay: Relay | null = null;
-  private subscriptions: Array<() => void> = [];
+  private relayRetirement: Promise<void> | null = null;
+  private extension: {
+    choice: WalletChoice;
+    session: ExtensionSession;
+    ready: Promise<void> | null;
+    activation: number;
+    cancelActivation: (() => void) | null;
+    explicitDisconnect: boolean;
+    waiting: boolean;
+    closing: Promise<void> | null;
+  } | null = null;
+  private revocations = new WeakMap<WalletProvider, Set<Promise<void>>>();
+  private extensionChainId: string | null = null;
   private relaySubscriptions: Array<() => void> = [];
   private generation = 0;
   private expectedLateResponse: string | number | undefined;
@@ -155,8 +198,10 @@ export class WalletController {
     this.expectedLateResponse = undefined;
     this.mode = null;
     this.authorizing = null;
-    for (const remove of this.subscriptions) remove();
-    this.subscriptions = [];
+    this.extension?.cancelActivation?.();
+    this.extension?.session.dispose();
+    this.extension = null;
+    this.extensionChainId = null;
     this.update({
       account: null,
       provider: null,
@@ -193,7 +238,10 @@ export class WalletController {
     }
     return () => {
       window.removeEventListener("eip6963:announceProvider", announce);
-      for (const remove of [...this.subscriptions, ...this.relaySubscriptions]) remove();
+      this.extension?.cancelActivation?.();
+      this.extension?.session.dispose();
+      this.extension = null;
+      for (const remove of this.relaySubscriptions) remove();
       this.generation++;
     };
   }
@@ -312,61 +360,200 @@ export class WalletController {
       if (this.authorizing === work) this.authorizing = null;
     });
   }
-  async connectExtension(choice: WalletChoice, restore = false): Promise<void> {
-    if (this.state.busy) return;
-    this.clear();
+  private extensionChanged(state: ExtensionSessionState, choice: WalletChoice): void {
+    const active = state.intent || state.status === "disconnecting";
+    this.mode = active ? "extension" : null;
+    if (state.intent) this.remember(choice.id);
+    else this.remember(null);
+
+    let account: string | null = null;
+    let status = "Disconnected";
+    let error = state.error?.message ?? null;
+    if (state.status === "pending") status = `Unlock and approve in ${choice.name}`;
+    else if (state.status === "locked")
+      status = "Wallet locked. Unlock the extension, or press Disconnect.";
+    else if (state.status === "disconnecting") status = "Disconnecting";
+    else if (state.status === "connected") {
+      try {
+        account = requireAccount(state.accounts);
+        status = "Connected";
+      } catch (cause) {
+        status = errorMessage(cause);
+      }
+    } else if (state.status === "disconnected" && error && this.extension?.explicitDisconnect)
+      error = `Disconnected on this page. The wallet reported: ${error}`;
+
+    const provider = active ? choice.provider : null;
+    const changed =
+      account !== this.state.account ||
+      provider !== this.state.provider ||
+      state.chainId !== this.extensionChainId;
+    if (changed) this.expectedLateResponse = undefined;
+    this.extensionChainId = state.chainId;
+    this.update({
+      account,
+      provider,
+      transport: active ? "extension" : null,
+      uri: null,
+      status,
+      error,
+      busy: state.status === "pending" || state.status === "disconnecting",
+      lateTransaction: null,
+      revision: this.state.revision + (changed ? 1 : 0),
+    });
+  }
+  private trackRevocation(provider: WalletProvider, request: Promise<unknown>): void {
+    let pending = this.revocations.get(provider);
+    if (!pending) {
+      pending = new Set();
+      this.revocations.set(provider, pending);
+    }
+    const settled = request.then(
+      () => {},
+      () => {},
+    );
+    pending.add(settled);
+    void settled.then(() => {
+      pending.delete(settled);
+    });
+  }
+  private revocationBarrier(provider: WalletProvider): Promise<boolean> | null {
+    // This barrier lasts for this page; wallets must order writes across reloads.
+    const pending = this.revocations.get(provider);
+    if (!pending?.size) return null;
+    return settlesWithinTimeout(
+      (async () => {
+        // A disposed helper can still dispatch its already scheduled revoke.
+        while (pending.size) await Promise.all([...pending]);
+      })(),
+    );
+  }
+  async connectExtension(choice = this.extension?.choice, restore = false): Promise<void> {
+    if (!choice || (this.state.busy && this.mode !== "extension")) return;
+    this.remember(choice.id);
+    if (this.extension?.choice.provider !== choice.provider) {
+      this.clear();
+      this.mode = "extension";
+      const generation = this.generation;
+      const subscriptions = new Map<(value: unknown) => void, () => void>();
+      const session = createExtensionSession(
+        {
+          request: ({ method, params }) => {
+            const request = choice.provider.request({
+              method,
+              ...(params ? { params: [...params] } : {}),
+            });
+            if (method === "wallet_revokePermissions")
+              this.trackRevocation(choice.provider, request);
+            return request;
+          },
+          on: (event, handler) => {
+            subscriptions.set(handler, choice.provider.listen(event, handler));
+          },
+          removeListener: (_event, handler) => {
+            subscriptions.get(handler)?.();
+            subscriptions.delete(handler);
+          },
+        },
+        {
+          validateAccount: isCurrentQrlAddress,
+          onStateChange: (state) => {
+            // Activation owns the UI while the helper finishes its previous revoke.
+            if (generation === this.generation && !this.extension?.waiting)
+              this.extensionChanged(state, choice);
+          },
+        },
+      );
+      const relay = this.relay;
+      this.extension = {
+        choice,
+        session,
+        ready: relay
+          ? (this.relayRetirement ??= Promise.resolve().then(() => relay.disconnect()))
+          : null,
+        activation: 0,
+        cancelActivation: null,
+        explicitDisconnect: false,
+        waiting: false,
+        closing: null,
+      };
+    }
+    const selected = this.extension;
+    selected.cancelActivation?.();
+    const activation = ++selected.activation;
+    const cancelled = new Promise<void>((resolve) => {
+      selected.cancelActivation = resolve;
+    });
+    selected.explicitDisconnect = false;
+    selected.waiting = true;
     this.mode = "extension";
-    const generation = this.generation;
-    this.update({ busy: true, error: null, status: "Opening extension" });
+    if (this.state.account !== null) this.expectedLateResponse = undefined;
+    this.update({
+      account: null,
+      provider: choice.provider,
+      transport: "extension",
+      busy: true,
+      error: null,
+      status: `Unlock and approve in ${choice.name}`,
+      revision: this.state.revision + (this.state.account === null ? 0 : 1),
+    });
     try {
-      if (this.relay) await this.relay.disconnect();
-      const accounts = await choice.provider.request({
-        method: restore ? "qrl_accounts" : "qrl_requestAccounts",
-      });
-      if (generation !== this.generation) return;
-      const account = requireAccount(accounts);
-      this.remember(choice.id);
-      this.update({
-        account,
-        provider: choice.provider,
-        transport: "extension",
-        status: "Connected",
-        revision: this.state.revision + 1,
-      });
-      this.subscriptions = [
-        choice.provider.listen("accountsChanged", (value) => {
-          if (this.state.provider === choice.provider)
-            this.accountsChanged(value, choice.provider, "extension");
-        }),
-        choice.provider.listen("disconnect", () => {
-          if (this.state.provider === choice.provider) {
-            this.remember(null);
-            this.clear();
-          }
-        }),
-        choice.provider.listen("chainChanged", () => {
-          if (this.state.provider === choice.provider)
-            this.update({ revision: this.state.revision + 1 });
-        }),
-      ];
+      if (selected.ready) await Promise.race([selected.ready, cancelled]);
+      if (this.extension !== selected || selected.activation !== activation) return;
+      if (this.relayRetirement === selected.ready) this.relayRetirement = null;
+      const barrier = this.revocationBarrier(choice.provider);
+      if (barrier) {
+        this.update({
+          account: null,
+          busy: true,
+          status: `Finishing disconnect in ${choice.name}`,
+        });
+        const settled = await Promise.race([barrier, cancelled]);
+        if (this.extension !== selected || selected.activation !== activation) return;
+        if (!settled) {
+          this.remember(null);
+          this.clear();
+          this.update({ error: revocationTimeoutMessage });
+          return;
+        }
+      }
+      selected.waiting = false;
+      await Promise.race([
+        restore ? selected.session.restore() : selected.session.connect(),
+        cancelled,
+      ]);
     } catch (error) {
-      if (generation === this.generation) {
+      if (this.extension === selected && selected.activation === activation) {
+        if (this.relayRetirement === selected.ready) this.relayRetirement = null;
         this.remember(null);
         this.clear();
         if (!restore) this.update({ error: errorMessage(error) });
       }
     } finally {
-      if (generation === this.generation) this.update({ busy: false });
+      if (selected.activation === activation) {
+        selected.cancelActivation?.();
+        selected.cancelActivation = null;
+      }
     }
   }
   async pair(fresh = false): Promise<void> {
-    if (this.state.busy) return;
+    if (this.state.busy && this.mode !== "extension") return;
     this.clear();
     this.mode = "relay";
     const generation = this.generation;
     this.update({ busy: true, error: null, status: "Preparing connection" });
     try {
       const relay = this.getRelay();
+      // Extension selection may still be retiring this relay's previous channel.
+      const retirement = this.relayRetirement;
+      if (retirement) {
+        try {
+          await retirement;
+        } finally {
+          if (this.relayRetirement === retirement) this.relayRetirement = null;
+        }
+        if (generation !== this.generation) return;
+      }
       const uri = fresh ? await relay.newConnection() : await relay.getConnectionURI();
       if (generation !== this.generation) return;
       this.remember("relay");
@@ -379,7 +566,44 @@ export class WalletController {
       }
     }
   }
+  async reconnect(): Promise<void> {
+    if (this.mode === "extension" && this.extension) {
+      const choice = this.extension.choice;
+      this.clear();
+      await this.connectExtension(choice, true);
+    } else {
+      await this.disconnect();
+    }
+  }
   async disconnect(): Promise<void> {
+    if (this.mode === "extension" && this.extension) {
+      // Cancel activation even when the previous relay is still retiring.
+      const selected = this.extension;
+      this.remember(null);
+      selected.explicitDisconnect = true;
+      selected.activation++;
+      selected.cancelActivation?.();
+      selected.cancelActivation = null;
+      selected.waiting = false;
+      if (selected.closing) {
+        await selected.closing;
+        return;
+      }
+      const closing = selected.session.disconnect();
+      // Reserve the provider barrier before the helper dispatches its revoke.
+      // The provider wrapper also tracks the actual request across disposal.
+      this.trackRevocation(selected.choice.provider, closing);
+      const work = settlesWithinTimeout(closing).then((settled) => {
+        if (!settled && this.extension === selected && !selected.waiting) {
+          this.clear();
+          this.update({ error: revocationTimeoutMessage });
+        }
+      });
+      selected.closing = work;
+      await work;
+      if (selected.closing === work) selected.closing = null;
+      return;
+    }
     if (this.state.busy) return;
     const wasRelay = this.mode === "relay";
     this.update({ busy: true });

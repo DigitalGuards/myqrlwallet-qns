@@ -521,16 +521,20 @@ export function App({
         </nav>
         <button
           className="secondary"
-          disabled={wallet.busy || claiming}
+          disabled={(wallet.busy && wallet.transport !== "extension") || claiming}
           onClick={() => {
-            if (wallet.account) void controller.disconnect();
+            if (wallet.account || wallet.transport === "extension") void controller.disconnect();
             else {
               window.dispatchEvent(new Event("eip6963:requestProvider"));
               setPicker(true);
             }
           }}
         >
-          {wallet.account ? "Disconnect" : wallet.busy ? "Connecting..." : "Connect wallet"}
+          {wallet.account || wallet.transport === "extension"
+            ? "Disconnect"
+            : wallet.busy
+              ? "Connecting..."
+              : "Connect wallet"}
         </button>
       </header>
       <main id="main" className="page">
@@ -914,6 +918,16 @@ export function App({
                   </Row>
                 )}
               </dl>
+              {wallet.transport === "extension" && !wallet.account && !wallet.busy && (
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    void controller.connectExtension();
+                  }}
+                >
+                  Connect again
+                </button>
+              )}
               {wallet.error && <Message error>{wallet.error}</Message>}
               {walletError && (
                 <>
@@ -921,7 +935,7 @@ export function App({
                   <button
                     className="text-button"
                     onClick={() => {
-                      void controller.disconnect();
+                      void controller.reconnect();
                     }}
                   >
                     Reconnect wallet
