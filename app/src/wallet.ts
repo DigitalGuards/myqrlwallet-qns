@@ -135,11 +135,13 @@ export class WalletController {
   };
   private listeners = new Set<() => void>();
   private relay: Relay | null = null;
+  private relayTransition: Promise<void> = Promise.resolve();
   private extension: {
     choice: WalletChoice;
     session: ExtensionSession;
     ready: Promise<void> | null;
     activation: number;
+    waiting: boolean;
     closing: Promise<void> | null;
   } | null = null;
   private revocations = new WeakMap<WalletProvider, Set<Promise<void>>>();
@@ -224,7 +226,7 @@ export class WalletController {
       this.mode = "relay";
       const relay = this.getRelay();
       if (relay.hasStoredSession()) {
-        this.update({ status: "Reconnecting" });
+        this.update({ provider: relay, transport: "relay", status: "Reconnecting" });
         if (relay.isConnected()) this.authorizeRelay();
       } else {
         this.remember(null);
@@ -278,7 +280,8 @@ export class WalletController {
         if (this.mode === "relay") this.update({ revision: this.state.revision + 1 });
       }),
       relay.listen("statusChanged", (status) => {
-        if (this.mode === "relay" && typeof status === "string") this.update({ status });
+        if (this.mode === "relay" && !this.state.busy && typeof status === "string")
+          this.update({ status });
       }),
       relay.listen("disconnect", () => {
         if (this.mode !== "relay" || this.state.busy) return;
@@ -291,6 +294,14 @@ export class WalletController {
       }),
     ];
     return relay;
+  }
+  private queueRelay<T>(operation: () => Promise<T>): Promise<T> {
+    const work = this.relayTransition.then(operation);
+    this.relayTransition = work.then(
+      () => {},
+      () => {},
+    );
+    return work;
   }
   private relayAccountsChanged(accounts: unknown, provider: WalletProvider): void {
     try {
@@ -402,6 +413,7 @@ export class WalletController {
     });
   }
   private revocationBarrier(provider: WalletProvider): Promise<boolean> | null {
+    // This barrier lasts for this page; wallets must order writes across reloads.
     const pending = this.revocations.get(provider);
     if (!pending?.size) return null;
     return settlesWithinTimeout(
@@ -412,7 +424,8 @@ export class WalletController {
     );
   }
   async connectExtension(choice = this.extension?.choice, restore = false): Promise<void> {
-    if (!choice || (this.mode !== "extension" && this.state.busy)) return;
+    if (!choice) return;
+    this.remember(choice.id);
     if (this.extension?.choice.provider !== choice.provider) {
       this.clear();
       this.mode = "extension";
@@ -440,28 +453,36 @@ export class WalletController {
         {
           validateAccount: isCurrentQrlAddress,
           onStateChange: (state) => {
-            if (generation === this.generation) this.extensionChanged(state, choice);
+            // Activation owns the UI while the helper finishes its previous revoke.
+            if (generation === this.generation && !this.extension?.waiting)
+              this.extensionChanged(state, choice);
           },
         },
       );
+      const relay = this.relay;
       this.extension = {
         choice,
         session,
-        ready: this.relay?.disconnect() ?? null,
+        ready: relay ? this.queueRelay(() => relay.disconnect()) : null,
         activation: 0,
+        waiting: false,
         closing: null,
       };
-      this.update({
-        account: null,
-        provider: choice.provider,
-        transport: "extension",
-        busy: true,
-        error: null,
-        status: `Unlock and approve in ${choice.name}`,
-      });
     }
     const selected = this.extension;
-    const activation = selected.activation;
+    const activation = ++selected.activation;
+    selected.waiting = true;
+    this.mode = "extension";
+    if (this.state.account !== null) this.expectedLateResponse = undefined;
+    this.update({
+      account: null,
+      provider: choice.provider,
+      transport: "extension",
+      busy: true,
+      error: null,
+      status: `Unlock and approve in ${choice.name}`,
+      revision: this.state.revision + (this.state.account === null ? 0 : 1),
+    });
     try {
       if (selected.ready) await selected.ready;
       if (this.extension !== selected || selected.activation !== activation) return;
@@ -481,6 +502,7 @@ export class WalletController {
           return;
         }
       }
+      selected.waiting = false;
       await (restore ? selected.session.restore() : selected.session.connect());
     } catch (error) {
       if (this.extension === selected && selected.activation === activation) {
@@ -492,14 +514,24 @@ export class WalletController {
   }
   async pair(fresh = false): Promise<void> {
     if (this.state.busy && this.mode !== "extension") return;
+    this.remember("relay");
     this.clear();
     this.mode = "relay";
     const generation = this.generation;
-    this.update({ busy: true, error: null, status: "Preparing connection" });
     try {
       const relay = this.getRelay();
-      const uri = fresh ? await relay.newConnection() : await relay.getConnectionURI();
-      if (generation !== this.generation) return;
+      this.update({
+        provider: relay,
+        transport: "relay",
+        busy: true,
+        error: null,
+        status: "Preparing connection",
+      });
+      const uri = await this.queueRelay(() => {
+        if (generation !== this.generation) return Promise.resolve(null);
+        return fresh ? relay.newConnection() : relay.getConnectionURI();
+      });
+      if (generation !== this.generation || uri === null) return;
       this.remember("relay");
       this.update({ uri, status: "Waiting for wallet", busy: false });
       if (relay.isConnected()) this.authorizeRelay();
@@ -525,6 +557,7 @@ export class WalletController {
       // Cancel activation even when the previous relay is still retiring.
       const selected = this.extension;
       selected.activation++;
+      selected.waiting = false;
       if (selected.closing) {
         await selected.closing;
         return;
@@ -534,7 +567,7 @@ export class WalletController {
       // The provider wrapper also tracks the actual request across disposal.
       this.trackRevocation(selected.choice.provider, closing);
       const work = settlesWithinTimeout(closing).then((settled) => {
-        if (!settled && this.extension === selected) {
+        if (!settled && this.extension === selected && !selected.waiting) {
           this.clear();
           this.update({ error: revocationTimeoutMessage });
         }
@@ -544,14 +577,14 @@ export class WalletController {
       if (selected.closing === work) selected.closing = null;
       return;
     }
-    if (this.state.busy) return;
     const wasRelay = this.mode === "relay";
-    this.update({ busy: true });
+    this.clear();
+    const generation = this.generation;
+    const relay = this.relay;
     try {
-      if (wasRelay && this.relay) await this.relay.disconnect();
-      this.clear();
+      if (wasRelay && relay) await this.queueRelay(() => relay.disconnect());
     } catch (error) {
-      this.update({ error: errorMessage(error), busy: false });
+      if (generation === this.generation) this.update({ error: errorMessage(error) });
     }
   }
 }

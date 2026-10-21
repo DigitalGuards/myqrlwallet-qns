@@ -521,16 +521,16 @@ export function App({
         </nav>
         <button
           className="secondary"
-          disabled={claiming || (wallet.busy && wallet.transport !== "extension")}
+          disabled={claiming}
           onClick={() => {
-            if (wallet.account || wallet.transport === "extension") void controller.disconnect();
+            if (wallet.transport) void controller.disconnect();
             else {
               window.dispatchEvent(new Event("eip6963:requestProvider"));
               setPicker(true);
             }
           }}
         >
-          {wallet.account || wallet.transport === "extension" ? "Disconnect" : "Connect wallet"}
+          {wallet.transport ? "Disconnect" : "Connect wallet"}
         </button>
       </header>
       <main id="main" className="page">
