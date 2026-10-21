@@ -14,6 +14,7 @@ export default defineConfig(
     },
   },
   js.configs.recommended,
+  { files: ["src/networkConfig.js"], languageOptions: { globals: { URL: "readonly" } } },
   {
     files: ["**/*.ts"],
     extends: [tseslint.configs.strictTypeChecked, prettier],
@@ -37,13 +38,6 @@ export default defineConfig(
         },
       ],
       "@typescript-eslint/restrict-template-expressions": ["error", { allowNumber: true }],
-    },
-  },
-  {
-    // Provider composition tests inspect private connection state to mock transport.
-    files: ["src/connect-v5.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
     },
   },
 );

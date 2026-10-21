@@ -56,9 +56,17 @@ calls this command, so all three checks are required in CI.
 Production TypeScript uses the strict compiler options and the
 `strict-type-checked` ESLint rules. Type assertions, explicit `any`, non-null
 assertions, TypeScript directives, and inline lint overrides fail the checks.
-Const assertions are allowed. The Connect composition test has a scoped
-type-assertion override to mock private transport state.
+Const assertions are allowed. The Connect composition test validates its
+transport mock at runtime and uses the same rules as production code.
 
 Provider responses enter as `unknown` and pass a runtime hex-byte guard before
 ABI decoding. Malformed responses throw `TypeError` without coercing the returned
 value to a string.
+
+## Registration and ownership
+
+`parseNetworkConfig(unknown)` validates the existing deployment JSON format and retains only browser-safe fields. `assertDeployment({ config, provider })` checks network identity, code and registry/registrar/resolver wiring. `registrationName(input)` accepts a label or a full `.qrl` name and returns the normalized spelling, label hash and namehash. `isAvailable` calls the FIFS registrar and requires a canonical 64-byte boolean response.
+
+`registerName(input, options)` takes the network config, a read provider, a wallet provider, the account, the `extension` or `relay` transport, an optional-primary flag and an `onUpdate` callback. It confirms each required transaction before submitting the next: registration, resolver selection, address record, published forward name record, then optional primary name. It verifies forward and reverse results. Repeated calls skip correct records owned by the same account. Every write rechecks the wallet account and network. A failed, interrupted or unconfirmed step stops the sequence. Consumers must retain unresolved transaction state before offering a retry; `checkRegistrationTransaction` binds a recovery receipt to the exact expected operation and detects consumed nonces. `readRegistrationState` reads ownership, resolver, address, spelling and verified reverse records at one block. `waitForReceipt` alone only checks receipt status. The approval update identifies the pending step. After the wallet returns a transaction hash, the SDK reads the submitted transaction's nonce from the chain through `qrl_getTransactionByHash` and includes it in subsequent updates once available. An approval interrupted before a hash is returned recovers through `readRegistrationState`, using the name's on-chain state to identify completed steps.
+
+`listOwnedNames(account, context, knownNames, signal)` scans registry events with native 64-byte topics in pages of at most 2,000 blocks and verifies current ownership at a fixed block. Results contain the node hash, label hash and an optional verified spelling. Plaintext labels are absent from the registrar ABI and event log. The app publishes spellings through the existing resolver `setName(bytes32,string)` call. Its `NameChanged` logs, verified primary names and supplied hints provide preimages. Every candidate spelling must hash to its logged node. Unknown spellings remain `null`. Endpoint block-range refusals reduce the page size and retry the same starting block; an unspecified range limit uses bounded halving. Other provider errors propagate. `deploymentBlock` is optional and, when supplied, must be a positive safe integer naming the QNSRegistry deployment receipt block. Omitted values remain absent in parsed configs so consumers can show a clear incomplete-list notice. Scans with that fallback start at block 1. Log queries never start at genesis. Providers must propagate JSON-RPC error messages, including those returned with HTTP 400, so range limits can be recognized.

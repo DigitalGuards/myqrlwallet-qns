@@ -5,6 +5,7 @@
   "rpcUrl": "https://qrlwallet.com/api/qrl-rpc/testnet",
   "tld": "qrl",
   "qrl2PrecompileSet": "qrl2-pq-v1",
+  "deploymentBlock": 1,
   "contracts": {
     "QNSRegistry": null,
     "Root": null,

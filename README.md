@@ -23,10 +23,17 @@ The QNS SDK supports Connect `>=5.0.1 <6.0.0` and its full-width account and RPC
 ```text
 contracts/hyperion/   Canonical registry, resolver, registrar, and crypto contracts
 sdk/                  TypeScript namehash, resolution, and precompile helpers
+app/                  Registration, wallet connection, owned names, and lookups
 scripts/              Hyperion compilation, deployment, and integration checks
 config/               Network configuration; deployment records stay local and ignored
 docs/                 Protocol decisions, migration notes, and QIP groundwork
 ```
+
+## Registration app
+
+The React app in [`app/`](app/README.md) supports `.qrl` searches, wallet connection, confirmed registration and resolver setup, optional primary names, owned records, and forward/reverse lookups. It reads the same network JSON as the deploy script. The default v3 example displays deployment pending until contract addresses are supplied. See the app README for development, validation and the lead's deployment command.
+
+Network configs accept `deploymentBlock`, a positive safe integer identifying the block in the QNSRegistry deployment receipt. The deploy script records that receipt block. Both undeployed examples use `1` as a placeholder, which deployment replaces. Older configs may omit the field: owned-name scans start at block 1 and the app warns that the list may be incomplete. Log requests start above genesis, use pages of at most 2,000 blocks, and shrink to endpoint range limits.
 
 ## Build and test
 
@@ -37,6 +44,8 @@ npm test
 ```
 
 The test command uses the central 64-byte compiler at `../hyperion/build/hypc/hypc`, verifies its exact version and SHA-256 against `config/hyperion-toolchain.json`, compiles every deployable contract through via-IR, executes the Q128 and `bytes32` mapping-accessor regression under default and optimized legacy and via-IR codegen, runs the deployment-script unit tests, type-checks the SDK, and runs its unit tests. `HYPERION_COMPILER` and `HYPC_BIN` may select another path only when that binary has the reviewed identity. `npm run test:behavior` runs the live contract behavior suite against a deployed stack (it skips itself when `QNS_BEHAVIOR=1` is not set).
+
+Worktrees can select the reviewed source tree with `HYPERION_SOURCE_DIR` and the semantic runner and VM with `HYPERION_HYPTEST` and `QRVMONE_LIBRARY`. Compiler version and SHA-256 verification still use the pinned toolchain file.
 
 Build Hyperion with Z3 support and run the reproducible formal security gate with:
 
@@ -78,7 +87,7 @@ QNS_CONFIG=config/local-qip55.json npm run deploy:testnet
 Select one of the public development accounts supplied by the Kurtosis package without copying its seed into your shell:
 
 ```bash
-QNS_PUBLIC_DEV_ACCOUNT=0 npm run deploy:testnet
+QNS_CONFIG=config/local-qip55.json QNS_PUBLIC_DEV_ACCOUNT=0 npm run deploy:testnet
 QNS_PUBLIC_DEV_ACCOUNT=0 npm run register -- alice
 npm run verify:pq
 ```

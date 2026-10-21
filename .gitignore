@@ -18,6 +18,8 @@ broadcast/
 node_modules/
 sdk/dist/
 sdk/node_modules/
+app/dist/
+app/node_modules/
 
 # Editor / agent
 .claude/
