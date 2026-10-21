@@ -738,55 +738,72 @@ export function App({
         : null;
   const updates =
     tracked && updateState && sameClaimRequest(tracked, updateState.scope) ? updateState.items : [];
-  const progress =
-    deployed && (tracked || (search && canClaim))
-      ? {
-          name: tracked?.name ?? search?.name ?? "",
-          config,
-          primary: tracked?.primary ?? primary,
-          state: search && (!tracked || tracked.name === search.name) ? search.setup : null,
-          updates:
-            updates.length > 0
-              ? updates
-              : pending && tracked && sameClaimRequest(tracked, claimScope(pending))
-                ? [
-                    {
-                      ...pending.update,
-                      status:
-                        pending.update.status === "approval"
-                          ? ("unconfirmed" as const)
-                          : pending.update.status,
-                    },
-                  ]
-                : [],
-          running: claiming,
-          ...(claiming && flow?.plan ? { plan: flow.plan } : {}),
-        }
-      : null;
+  const showProgress = deployed && (tracked || (search && canClaim));
+  const progress = {
+    name:
+      tracked?.name ??
+      search?.name ??
+      readErrorName ??
+      (selection.input !== null && selection.node !== null
+        ? registrationName(selection.input).name
+        : ""),
+    config,
+    primary: tracked?.primary ?? primary,
+    state: search && (!tracked || tracked.name === search.name) ? search.setup : null,
+    updates:
+      updates.length > 0
+        ? updates
+        : pending && tracked && sameClaimRequest(tracked, claimScope(pending))
+          ? [
+              {
+                ...pending.update,
+                status:
+                  pending.update.status === "approval"
+                    ? ("unconfirmed" as const)
+                    : pending.update.status,
+              },
+            ]
+          : [],
+    running: claiming,
+    connected: wallet.account !== null,
+    searching,
+    searchError,
+    ...(claiming && flow?.plan ? { plan: flow.plan } : {}),
+  };
 
-  const approvalDetails = showApprovals && approvalPlan && (
+  const approvalDetails = showApprovals && (
     <>
       <dl>
         <Row label="Registration price">Free</Row>
-        <Row label="Network fee">Each approval costs a small fee in Quanta.</Row>
-        <Row label="Wallet approvals">
-          {remainingApprovals(approvalPlan, claiming ? updates : [])} remaining
-        </Row>
+        {approvalPlan && (
+          <>
+            <Row label="Network fee">Each approval costs a small fee in Quanta.</Row>
+            <Row label="Wallet approvals">
+              {remainingApprovals(approvalPlan, claiming ? updates : [])} remaining
+            </Row>
+          </>
+        )}
       </dl>
-      <label className="checkbox-label">
-        <input
-          type="checkbox"
-          checked={primary}
-          disabled={claiming || pending !== null || checkingPending}
-          onChange={(event) => {
-            setPrimary(event.target.checked);
-            setFlow(null);
-            setUpdateState(null);
-          }}
-        />
-        <span>Use as my primary name</span>
-      </label>
-      <p className="muted text-sm">Your primary name appears when someone looks up your address.</p>
+      {approvalPlan && (
+        <>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={primary}
+              disabled={claiming || pending !== null || checkingPending}
+              onChange={(event) => {
+                setPrimary(event.target.checked);
+                setFlow(null);
+                setUpdateState(null);
+              }}
+            />
+            <span>Use as my primary name</span>
+          </label>
+          <p className="muted text-sm">
+            Your primary name appears when someone looks up your address.
+          </p>
+        </>
+      )}
     </>
   );
 
@@ -848,7 +865,9 @@ export function App({
                 <h2 id="register-title">Find your .qrl name</h2>
                 <p>Use letters, numbers and hyphens.</p>
               </div>
-              {progress && <ClaimSummary {...progress} />}
+              {deployed && (showProgress || !search || !wallet.account) && (
+                <ClaimSummary {...progress} />
+              )}
               {!deployed && (
                 <Message>
                   QNS deployment is pending on this network. Search and registration will open when
@@ -952,7 +971,7 @@ export function App({
                       )}
                 </div>
               )}
-              {progress && <ClaimProgress {...progress} />}
+              {showProgress && <ClaimProgress {...progress} />}
               {claimError && (
                 <>
                   {claimError.scope.node !== selection.node && (

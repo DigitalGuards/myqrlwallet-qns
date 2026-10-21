@@ -20,6 +20,75 @@ import {
 
 afterEach(cleanup);
 
+it.each([false, true])("explains an empty search (connected=%s)", (connected) => {
+  render(
+    <ClaimSummary
+      name=""
+      config={config}
+      primary={false}
+      state={null}
+      updates={[]}
+      running={false}
+      connected={connected}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toBe("Search for a name to see the steps.");
+});
+
+it.each([
+  {
+    connected: false,
+    searching: false,
+    searchError: null,
+    expected: "Connect your wallet to see the approvals alice.qrl needs.",
+  },
+  ...[false, true].flatMap((connected) => [
+    { connected, searching: true, searchError: null, expected: "Reading alice.qrl..." },
+    {
+      connected,
+      searching: false,
+      searchError: "Could not refresh name availability: Name lookup failed",
+      expected: "Check the error below and search again.",
+    },
+  ]),
+])("summarizes the name read: $expected (connected=$connected)", (props) => {
+  render(
+    <ClaimSummary
+      name="alice.qrl"
+      config={config}
+      primary={false}
+      state={null}
+      updates={[]}
+      running={false}
+      connected={props.connected}
+      searching={props.searching}
+      searchError={props.searchError}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toBe(props.expected);
+});
+
+it.each([false, true])("preserves the approval count (primary=%s)", async (primary) => {
+  const state = await readRegistrationState("alice", ACCOUNT, {
+    config,
+    provider: new MockChain(),
+  });
+  render(
+    <ClaimSummary
+      name="alice.qrl"
+      config={config}
+      primary={primary}
+      state={state}
+      updates={[]}
+      running={false}
+      connected
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toBe(
+    `Set up alice.qrl: ${primary ? 5 : 4} wallet approvals remaining.`,
+  );
+});
+
 const answers: TransactionStatus[] = ["confirmed", "failed"];
 it.each(claimSteps.flatMap((step) => answers.map((answer) => ({ step, answer }))))(
   "keeps $step approval ahead of a complete snapshot and reconciles after $answer",

@@ -151,6 +151,9 @@ interface ClaimProgressProps {
   plan?: RegistrationPlan;
   updates: TransactionUpdate[];
   running: boolean;
+  connected?: boolean;
+  searching?: boolean;
+  searchError?: string | null;
 }
 
 function nextStepMessage(
@@ -171,6 +174,9 @@ function progressFor({
   plan: suppliedPlan,
   updates,
   running,
+  connected = false,
+  searching = false,
+  searchError = null,
 }: ClaimProgressProps) {
   const plan = suppliedPlan ?? (state ? registrationPlan(state, primary) : null);
   const entries =
@@ -208,7 +214,13 @@ function progressFor({
       ? `Claiming ${name}: ${done} of ${steps.length} steps done, ${nextStepMessage(current?.update, done === steps.length, running)}.`
       : plan
         ? `Set up ${name}: ${remainingApprovals(plan)} wallet approvals remaining.`
-        : "Search to read the remaining approvals.";
+        : searchError
+          ? "Check the error below and search again."
+          : searching
+            ? `Reading ${name}...`
+            : name && !connected
+              ? `Connect your wallet to see the approvals ${name} needs.`
+              : "Search for a name to see the steps.";
   return { steps, progress, current, ready, summary };
 }
 
