@@ -135,6 +135,8 @@ describe("claim settlement after wallet changes", () => {
       await expectOwner("alice", owner, change === "account" ? OTHER : ACCOUNT);
       expect(controller.getSnapshot().account).toBe(change === "account" ? OTHER : ACCOUNT);
       expect(chain.sent).toHaveLength(outcome === "rejected" ? 0 : 1);
+      if (change === "network")
+        expect(screen.queryByText(/Check the pending transaction for/)).toBeNull();
     },
   );
 

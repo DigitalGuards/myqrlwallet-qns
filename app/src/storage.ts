@@ -3,6 +3,7 @@ import {
   registrationName,
   type NetworkConfig,
   type TransactionUpdate,
+  type TransactionStatus,
 } from "@qns/sdk";
 import { isRecord } from "./rpc";
 
@@ -34,16 +35,32 @@ export function rememberName(config: NetworkConfig, name: string): void {
 }
 
 export interface PendingClaim {
-  name: string;
-  account: string;
-  update: TransactionUpdate;
-  primary?: boolean;
-  attemptId?: string;
+  readonly name: string;
+  readonly account: string;
+  readonly update: TransactionUpdate;
+  readonly primary?: boolean;
+  readonly attemptId?: string;
+  readonly trackedHash?: string;
 }
 
 function pendingKey(config: NetworkConfig, account: string): string {
   return `${key(config, "pending")}:${config.genesisHash ?? config.rpcUrl}:${canonicalAddress(account)}`;
 }
+
+// Reload keeps settled outcomes terminal and resumes unfinished wallet requests as uncertain.
+const restoredStatuses = {
+  approval: "unconfirmed",
+  pending: "unconfirmed",
+  verifying: "verification-failed",
+  unconfirmed: "unconfirmed",
+  confirmed: "confirmed",
+  skipped: "skipped",
+  failed: "failed",
+  mismatched: "mismatched",
+  replaced: "replaced",
+  incomplete: "incomplete",
+  "verification-failed": "verification-failed",
+} satisfies Record<TransactionStatus, TransactionStatus>;
 
 export function readPendingClaim(
   config: NetworkConfig,
@@ -64,7 +81,7 @@ export function readPendingClaim(
     )
       return null;
     if (canonicalAddress(value.account) !== canonicalAddress(account)) return null;
-    const { step, hash, nonce, requestId } = value.update;
+    const { step, hash, nonce, requestId, status: savedStatus } = value.update;
     if (
       (step !== "register" &&
         step !== "resolver" &&
@@ -90,12 +107,18 @@ export function readPendingClaim(
       account: canonicalAddress(value.account),
       primary: value.primary === true || step === "primary",
       ...(typeof value.attemptId === "string" ? { attemptId: value.attemptId } : {}),
+      ...(typeof value.trackedHash === "string" && /^0x[0-9a-fA-F]{64}$/.test(value.trackedHash)
+        ? { trackedHash: value.trackedHash }
+        : {}),
       update: {
         step,
         ...(typeof hash === "string" ? { hash } : {}),
         ...(typeof nonce === "string" ? { nonce } : {}),
         ...(typeof requestId === "string" || typeof requestId === "number" ? { requestId } : {}),
-        status: "unconfirmed",
+        status:
+          Object.entries(restoredStatuses).find(([status]) => status === savedStatus)?.[1] ??
+          "unconfirmed",
+        ...(typeof value.update.message === "string" ? { message: value.update.message } : {}),
       },
     };
   } catch {

@@ -13,15 +13,27 @@ import {
 import { assertNetwork, requireContract } from "./config.js";
 import { isHexBytes } from "./guards.js";
 import { namehash, nodeToHex } from "./namehash.js";
-import { registrationName, type RegistrationContext } from "./registration.js";
-import { verifyReverse } from "./resolver.js";
+import {
+  readNameRecords,
+  registrationName,
+  type NameRecords,
+  type RegistrationContext,
+} from "./registration.js";
+import { lookupAddress, type RpcProvider } from "./resolver.js";
 
-export interface OwnedName {
+interface OwnedNameIdentity {
   node: string;
   labelHash: string;
   /** Null when no verified spelling is available from records or hints. */
   name: string | null;
 }
+
+/** Failed candidate reads remain visible and retryable; actions require verified records. */
+export type OwnedName = OwnedNameIdentity &
+  (
+    | { records: NameRecords; primary: boolean; error?: never }
+    | { records: null; primary: null; error: string }
+  );
 
 function subnode(parent: string, label: string): string {
   const hex = parent.slice(2) + label.slice(2);
@@ -57,8 +69,18 @@ export async function listOwnedNames(
   const { config, provider } = context;
   const registry = requireContract(config, "QNSRegistry");
   await assertNetwork(provider, config);
+  const head = quantity(await provider.request({ method: "qrl_blockNumber" }));
+  const snapshot: RpcProvider = {
+    request: (args) =>
+      provider.request(
+        args.method === "qrl_call"
+          ? { ...args, params: [args.params?.[0], toQuantity(head)] }
+          : args,
+      ),
+  };
   const names = new Map<string, string>();
-  const primary = await verifyReverse(owner, { registry, provider });
+  // Verify the primary's forward record within its candidate so a per-name failure stays local.
+  const primary = await lookupAddress(owner, { registry, provider: snapshot });
   for (const input of primary ? [...knownNames, primary] : knownNames) {
     try {
       const parsed = registrationName(input);
@@ -71,7 +93,6 @@ export async function listOwnedNames(
   const eventTopic = `0x${bytes32Word(hashText("NewOwner(bytes32,bytes32,address)"))}`;
   const parentTopic = `0x${bytes32Word(parent)}`;
   const nameTopic = `0x${bytes32Word(hashText("NameChanged(bytes32,string)"))}`;
-  const head = quantity(await provider.request({ method: "qrl_blockNumber" }));
   const candidates = new Map<string, string>();
   const deploymentBlock = config.deploymentBlock ?? 1;
   if (!Number.isSafeInteger(deploymentBlock) || deploymentBlock <= 0)
@@ -169,13 +190,45 @@ export async function listOwnedNames(
   const result: OwnedName[] = [];
   for (const [node, labelHash] of candidates) {
     signal?.throwIfAborted();
-    if (
-      decodeAddress(
-        await call(provider, registry, "owner(bytes32)", bytes32Word(node), toQuantity(head)),
-      ) === owner
-    ) {
-      result.push({ node, labelHash, name: names.get(node) ?? null });
+    let reading = "verify ownership";
+    try {
+      if (
+        decodeAddress(
+          await call(provider, registry, "owner(bytes32)", bytes32Word(node), toQuantity(head)),
+        ) !== owner
+      )
+        continue;
+      reading = "read name records";
+      const records = await readNameRecords(node, context, toQuantity(head));
+      if (records.spelling) {
+        try {
+          const parsed = registrationName(records.spelling);
+          if (parsed.node === node) names.set(node, parsed.name);
+        } catch {
+          // A resolver's spelling is only a hint until its hash matches the owned node.
+        }
+      }
+      const name = names.get(node) ?? null;
+      result.push({
+        node,
+        labelHash,
+        name,
+        records,
+        primary: name !== null && name === primary && records.address === owner,
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      result.push({
+        node,
+        labelHash,
+        name: names.get(node) ?? null,
+        records: null,
+        primary: null,
+        error: `Could not ${reading}: ${error instanceof Error ? error.message : "Request failed. Please try again."}`,
+      });
     }
   }
+  signal?.throwIfAborted();
+  await assertNetwork(provider, config);
   return result.sort((a, b) => (a.name ?? a.node).localeCompare(b.name ?? b.node));
 }

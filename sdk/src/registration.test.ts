@@ -186,18 +186,22 @@ describe("claim flow", () => {
       "register:approval",
       "register:pending",
       "register:pending",
+      "register:verifying",
       "register:confirmed",
       "resolver:approval",
       "resolver:pending",
       "resolver:pending",
+      "resolver:verifying",
       "resolver:confirmed",
       "address:approval",
       "address:pending",
       "address:pending",
+      "address:verifying",
       "address:confirmed",
       "name:approval",
       "name:pending",
       "name:pending",
+      "name:verifying",
       "name:confirmed",
     ]);
     expect(states.map((state) => state.owner)).toEqual([ACCOUNT, ACCOUNT, ACCOUNT, ACCOUNT]);
@@ -271,7 +275,7 @@ describe("owned names", () => {
     const { provider, options } = setup();
     await registerName("alice", options);
     expect(provider.primary).toBe("");
-    expect(await listOwnedNames(ACCOUNT, options)).toEqual([
+    expect(await listOwnedNames(ACCOUNT, options)).toMatchObject([
       {
         name: "alice.qrl",
         node: registrationName("alice").node,
@@ -310,12 +314,12 @@ describe("owned names", () => {
     provider.seed("carol", ACCOUNT);
     const names = await listOwnedNames(ACCOUNT, options, ["Alice.QRL", "bob", "café"]);
     expect(names).toHaveLength(2);
-    expect(names).toContainEqual({
+    expect(names.find((item) => item.name === "alice.qrl")).toMatchObject({
       name: "alice.qrl",
       node: registrationName("alice").node,
       labelHash: registrationName("alice").labelHash,
     });
-    expect(names).toContainEqual({
+    expect(names.find((item) => item.name === null)).toMatchObject({
       name: null,
       node: registrationName("carol").node,
       labelHash: registrationName("carol").labelHash,

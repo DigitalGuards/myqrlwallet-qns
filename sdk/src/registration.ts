@@ -20,7 +20,13 @@ import { assertNetwork, CONTRACT_NAMES, requireContract, type NetworkConfig } fr
 import { isHexBytes } from "./guards.js";
 import { namehash, nodeToHex } from "./namehash.js";
 import { normalize, QnsNameError } from "./normalize.js";
-import { resolveName, verifyReverse, type RpcProvider } from "./resolver.js";
+import {
+  getResolver,
+  lookupAddress,
+  resolveName,
+  verifyReverse,
+  type RpcProvider,
+} from "./resolver.js";
 
 export function registrationName(input: string): {
   name: string;
@@ -108,15 +114,26 @@ export async function assertDeployment(context: RegistrationContext): Promise<vo
   }
 }
 
-export type RegistrationStep = "register" | "resolver" | "address" | "name" | "primary";
+export const registrationSteps = ["register", "resolver", "address", "name", "primary"] as const;
+export type RegistrationStep = (typeof registrationSteps)[number];
 export type TransactionStatus =
-  "approval" | "pending" | "confirmed" | "skipped" | "failed" | "unconfirmed";
+  | "approval"
+  | "pending"
+  | "verifying"
+  | "confirmed"
+  | "skipped"
+  | "failed"
+  | "unconfirmed"
+  | "mismatched"
+  | "replaced"
+  | "incomplete"
+  | "verification-failed";
 export interface TransactionUpdate {
   step: RegistrationStep;
   status: TransactionStatus;
-  hash?: string;
-  nonce?: string;
-  requestId?: string | number;
+  readonly hash?: string;
+  readonly nonce?: string;
+  readonly requestId?: string | number;
   message?: string;
 }
 
@@ -155,13 +172,118 @@ export function registrationTransaction(
   return { from, ...calls[step], chainId: toQuantity(BigInt(config.chainId)), value: "0x0" };
 }
 
-export interface RegistrationState {
-  owner: string | null;
+export interface NameRecords {
   resolver: string;
+  /** Record reads can fail independently of authoritative registry ownership. */
+  resolverStatus: "unset" | "usable" | "unusable";
   address: string | null;
   spelling: string | null;
+}
+
+/** Read forward records at the caller's snapshot block, including externally claimed names. */
+export async function readNameRecords(
+  node: string,
+  context: RegistrationContext,
+  block: string,
+): Promise<NameRecords> {
+  const resolver = decodeAddress(
+    await call(
+      context.provider,
+      requireContract(context.config, "QNSRegistry"),
+      "resolver(bytes32)",
+      bytes32Word(node),
+      block,
+    ),
+  );
+  return readResolverRecords(node, resolver, context.provider, block);
+}
+
+async function readResolverRecord<T>(
+  node: string,
+  resolver: string,
+  provider: RpcProvider,
+  block: string,
+  signature: string,
+  decode: (value: unknown) => T,
+): Promise<T> {
+  let value: unknown;
+  try {
+    value = await call(provider, resolver, signature, bytes32Word(node), block);
+  } catch (error) {
+    if (isExecutionRevert(error)) throw new UnusableResolverError(error.message);
+    throw error;
+  }
+  try {
+    return decode(value);
+  } catch (error) {
+    throw new UnusableResolverError(error instanceof Error ? error.message : "Invalid record");
+  }
+}
+
+async function readResolverRecords(
+  node: string,
+  resolver: string,
+  provider: RpcProvider,
+  block: string,
+  tolerateUnusable = true,
+): Promise<NameRecords> {
+  if (resolver === ZERO_ADDRESS)
+    return { resolver, resolverStatus: "unset", address: null, spelling: null };
+  try {
+    const address = await readResolverRecord(
+      node,
+      resolver,
+      provider,
+      block,
+      "addr(bytes32)",
+      decodeAddress,
+    );
+    const spelling = await readResolverRecord(
+      node,
+      resolver,
+      provider,
+      block,
+      "name(bytes32)",
+      decodeString,
+    );
+    return {
+      resolver,
+      resolverStatus: "usable",
+      address: address === ZERO_ADDRESS ? null : address,
+      spelling,
+    };
+  } catch (error) {
+    if (!tolerateUnusable || !(error instanceof UnusableResolverError)) throw error;
+    // Only a resolver revert or an invalid returned ABI marks this name's resolver unusable.
+    return { resolver, resolverStatus: "unusable", address: null, spelling: null };
+  }
+}
+
+class UnusableResolverError extends Error {}
+
+function isExecutionRevert(error: unknown): error is { message: string } {
+  return (
+    isRecord(error) &&
+    typeof error.message === "string" &&
+    /^execution reverted\b/i.test(error.message)
+  );
+}
+
+export interface RegistrationState extends NameRecords {
+  owner: string | null;
   primary: string | null;
   complete: Record<RegistrationStep, boolean>;
+  /** Writes needed after preceding setup steps succeed, using this snapshot's records. */
+  required: Record<RegistrationStep, boolean>;
+}
+
+export type RegistrationPlan = ReadonlyArray<{ step: RegistrationStep; required: boolean }>;
+
+/** The ordered plan is shared by the approval count, progress display and executor. */
+export function registrationPlan(state: RegistrationState, primary: boolean): RegistrationPlan {
+  return registrationSteps
+    .filter((step) => step !== "primary" || primary)
+    .map((step) => ({ step, required: state.required[step] }));
 }
 
 /** Read every postcondition at one block so recovery also works for replacement hashes. */
@@ -181,27 +303,21 @@ export async function readRegistrationState(
   const { name, node } = registrationName(input);
   const owner = await nameOwner(name, { ...context, provider });
   const registry = requireContract(context.config, "QNSRegistry");
-  const resolver = decodeAddress(
-    await call(provider, registry, "resolver(bytes32)", bytes32Word(node)),
-  );
-  const address =
-    resolver === ZERO_ADDRESS
-      ? null
-      : decodeAddress(await call(provider, resolver, "addr(bytes32)", bytes32Word(node)));
-  const spelling =
-    resolver === ZERO_ADDRESS
-      ? null
-      : decodeString(await call(provider, resolver, "name(bytes32)", bytes32Word(node)));
-  const primary = await verifyReverse(account, { registry, provider });
+  const records = await readNameRecords(node, { ...context, provider }, block);
+  const { resolver, address, spelling } = records;
+  const { primary, reverseName } = await readPrimaryState(account, registry, provider);
+  const publicResolver = requireContract(context.config, "QRLPublicResolver");
+  const destination =
+    resolver === publicResolver && records.resolverStatus === "usable"
+      ? records
+      : await readResolverRecords(node, publicResolver, provider, block, false);
   const owned = owner === canonicalAddress(account);
-  const selected = owned && resolver === requireContract(context.config, "QRLPublicResolver");
+  const selected = owned && records.resolverStatus === "usable" && resolver === publicResolver;
   const forward = selected && address === canonicalAddress(account);
   await assertNetwork(context.provider, context.config);
   return {
     owner,
-    resolver,
-    address,
-    spelling,
+    ...records,
     primary,
     complete: {
       register: owned,
@@ -210,10 +326,26 @@ export async function readRegistrationState(
       name: forward && spelling === name,
       primary: forward && primary === name,
     },
+    required: {
+      register: !owned,
+      resolver: resolver !== publicResolver,
+      address: destination.address !== canonicalAddress(account),
+      name: destination.spelling !== name,
+      primary: reverseName !== name,
+    },
   };
 }
 
 type ExpectedTransaction = ReturnType<typeof registrationTransaction> & { nonce?: string };
+
+export class TransactionMismatchError extends Error {
+  constructor() {
+    super(
+      "This transaction does not match the pending step (sender, contract, calldata, chain or nonce).",
+    );
+    this.name = "TransactionMismatchError";
+  }
+}
 
 async function transactionNonce(
   hash: string,
@@ -239,9 +371,7 @@ async function transactionNonce(
     }
     return toQuantity(quantity(tx.nonce));
   } catch {
-    throw new Error(
-      "This transaction does not match the pending step (sender, contract, calldata, chain or nonce).",
-    );
+    throw new TransactionMismatchError();
   }
 }
 
@@ -264,7 +394,7 @@ export async function isNonceConsumed(
 export async function checkRegistrationTransaction(
   input: string,
   account: string,
-  update: TransactionUpdate,
+  update: Readonly<TransactionUpdate>,
   context: RegistrationContext,
 ): Promise<"confirmed" | "pending" | "replaced"> {
   await assertNetwork(context.provider, context.config);
@@ -295,6 +425,8 @@ export interface RegistrationOptions extends RegistrationContext {
   account: string;
   transport: "extension" | "relay";
   primary: boolean;
+  /** An already displayed plan must still match before any approval is requested. */
+  plan?: RegistrationPlan;
   onUpdate: (update: TransactionUpdate) => void;
   onState?: (state: RegistrationState) => void;
   signal?: AbortSignal;
@@ -313,6 +445,20 @@ export class ReplacedTransactionError extends Error {
   constructor() {
     super("The saved nonce has been used by another transaction. Re-check name state to continue.");
     this.name = "ReplacedTransactionError";
+  }
+}
+
+export class RevertedTransactionError extends Error {
+  constructor() {
+    super("Transaction reverted");
+    this.name = "RevertedTransactionError";
+  }
+}
+
+export class IncompleteRegistrationError extends Error {
+  constructor() {
+    super("The expected name record is still incomplete. Re-check name state to continue.");
+    this.name = "IncompleteRegistrationError";
   }
 }
 
@@ -343,7 +489,7 @@ export async function waitForReceipt(
         throw new Error("Invalid transaction receipt");
       quantity(receipt.blockNumber);
       const status = quantity(receipt.status);
-      if (status === 0n) throw new Error("Transaction reverted");
+      if (status === 0n) throw new RevertedTransactionError();
       if (status !== 1n) throw new Error("Invalid transaction status");
       return;
     }
@@ -388,6 +534,7 @@ async function send(
   let hash: string | undefined;
   let nonce: string | undefined;
   let requested = false;
+  let mined = false;
   try {
     await assertSigner(options);
     const tx = registrationTransaction(input, options.account, step, options.config);
@@ -421,11 +568,23 @@ async function send(
         options.onUpdate({ step, status: "pending", hash: result, nonce });
       },
     });
+    mined = true;
+    options.onUpdate({
+      step,
+      status: "verifying",
+      hash,
+      ...(nonce !== undefined ? { nonce } : {}),
+    });
+    if (
+      step === "primary" &&
+      (await verifyReverse(options.account, {
+        registry: requireContract(options.config, "QNSRegistry"),
+        provider: options.provider,
+      })) !== registrationName(input).name
+    )
+      throw new IncompleteRegistrationError();
     const state = await readRegistrationState(input, options.account, options);
-    if (!state.complete[step])
-      throw new Error(
-        "The expected name record is still incomplete. Re-check name state to continue.",
-      );
+    if (!state.complete[step]) throw new IncompleteRegistrationError();
     options.onUpdate({
       step,
       status: "confirmed",
@@ -437,11 +596,19 @@ async function send(
     options.onUpdate({
       step,
       status:
-        requested &&
-        !(isRecord(error) && error.code === 4001) &&
-        !(error instanceof Error && error.message === "Transaction reverted")
-          ? "unconfirmed"
-          : "failed",
+        error instanceof TransactionMismatchError
+          ? "mismatched"
+          : error instanceof ReplacedTransactionError
+            ? "replaced"
+            : error instanceof IncompleteRegistrationError
+              ? "incomplete"
+              : mined
+                ? "verification-failed"
+                : requested &&
+                    !(isRecord(error) && error.code === 4001) &&
+                    !(error instanceof RevertedTransactionError)
+                  ? "unconfirmed"
+                  : "failed",
       ...(hash ? { hash } : {}),
       ...(nonce !== undefined ? { nonce } : {}),
       message: error instanceof Error ? error.message : "Transaction failed",
@@ -450,64 +617,139 @@ async function send(
   }
 }
 
-/** Each write confirms before the next. Existing owner records allow recovery after interruption. */
+/** Reverse and registry reads stay strict. Forward records use the per-name resolver tolerance. */
+export async function readPrimaryState(
+  account: string,
+  registry: string,
+  provider: RpcProvider,
+): Promise<{ primary: string | null; reverseName: string | null }> {
+  const reverseName = await lookupAddress(account, { registry, provider });
+  if (!reverseName) return { primary: null, reverseName };
+  let forward: string | null;
+  try {
+    const resolver = await getResolver(reverseName, { registry, provider });
+    forward =
+      resolver === null
+        ? null
+        : await readResolverRecord(
+            nodeToHex(namehash(normalize(reverseName))),
+            resolver,
+            provider,
+            "latest",
+            "addr(bytes32)",
+            decodeAddress,
+          );
+  } catch (error) {
+    // Only an unusable forward resolver or an invalid stored spelling lacks a verified identity.
+    if (!(error instanceof UnusableResolverError) && !(error instanceof QnsNameError)) throw error;
+    forward = null;
+  }
+  return {
+    primary:
+      forward !== null && canonicalAddress(forward) === canonicalAddress(account)
+        ? reverseName
+        : null,
+    reverseName,
+  };
+}
+
+/** Each write confirms before the next. Every approval follows the displayed snapshot plan. */
 export async function registerName(input: string, options: RegistrationOptions): Promise<string> {
   const { name, node } = registrationName(input);
   const account = canonicalAddress(options.account);
   if (account === ZERO_ADDRESS) throw new Error("Connect a nonzero account");
   await assertDeployment(options);
   await assertSigner(options);
+  const initial = await readRegistrationState(name, account, options);
+  if (initial.owner !== null && initial.owner !== account)
+    throw new Error("This name is already owned by another account");
+  const computed = registrationPlan(initial, options.primary);
+  const plan = (options.plan ?? computed).map((entry) => ({ ...entry }));
+  const changed = () =>
+    new Error("Name records changed. Search again to review the remaining approvals.");
+  if (
+    plan.length !== computed.length ||
+    plan.some(
+      (entry, index) =>
+        entry.step !== computed[index]?.step || entry.required !== computed[index].required,
+    )
+  )
+    throw changed();
   const registry = requireContract(options.config, "QNSRegistry");
   const resolver = requireContract(options.config, "QRLPublicResolver");
   const readConfig = { registry, provider: options.provider };
-  const owner = await nameOwner(name, options);
-  if (owner !== null && owner !== account)
-    throw new Error("This name is already owned by another account");
-  if (owner === null) {
-    if (!(await isAvailable(name, options))) throw new Error("This name is no longer available");
-    await send("register", name, options);
-  } else options.onUpdate({ step: "register", status: "skipped" });
+  const completed: RegistrationStep[] = [];
   async function requireOwner(): Promise<void> {
     if ((await nameOwner(name, options)) !== account)
       throw new Error("Name ownership changed. Check the name before continuing.");
   }
-  await requireOwner();
-  if (
-    decodeAddress(
-      await call(options.provider, registry, "resolver(bytes32)", bytes32Word(node)),
-    ) !== resolver
-  ) {
-    await send("resolver", name, options);
-  } else options.onUpdate({ step: "resolver", status: "skipped" });
-  await requireOwner();
-  if (
-    decodeAddress(await call(options.provider, resolver, "addr(bytes32)", bytes32Word(node))) !==
-    account
-  ) {
-    await send("address", name, options);
-  } else options.onUpdate({ step: "address", status: "skipped" });
-  await requireOwner();
-  const resolved = await resolveName(name, readConfig);
-  if (resolved === null || canonicalAddress(resolved) !== account)
-    throw new Error("Forward resolution is not confirmed. Check records before continuing.");
-  if (
-    decodeString(await call(options.provider, resolver, "name(bytes32)", bytes32Word(node))) !==
-    name
-  ) {
-    await send("name", name, options);
+  async function requireSpelling(): Promise<void> {
     if (
       decodeString(await call(options.provider, resolver, "name(bytes32)", bytes32Word(node))) !==
       name
     )
       throw new Error("Name spelling verification failed");
-  } else options.onUpdate({ step: "name", status: "skipped" });
-  await requireOwner();
-  if (options.primary) {
-    if ((await verifyReverse(account, readConfig)) !== name) {
-      await send("primary", name, options);
-      if ((await verifyReverse(account, readConfig)) !== name)
-        throw new Error("Primary name verification failed");
-    } else options.onUpdate({ step: "primary", status: "skipped" });
+  }
+  // The snapshot fixes the plan. Live guards authorize each step and preserve prior records.
+  async function requiresWrite(step: RegistrationStep): Promise<boolean> {
+    if (step === "register") {
+      const owner = await nameOwner(name, options);
+      if (owner !== null && owner !== account)
+        throw new Error("This name is already owned by another account");
+      return owner === null;
+    }
+    await requireOwner();
+    const selected =
+      decodeAddress(
+        await call(options.provider, registry, "resolver(bytes32)", bytes32Word(node)),
+      ) === resolver;
+    if (step === "resolver") return !selected;
+    if (!selected) throw new IncompleteRegistrationError();
+    if (step === "address")
+      return (
+        decodeAddress(
+          await call(options.provider, resolver, "addr(bytes32)", bytes32Word(node)),
+        ) !== account
+      );
+    const resolved = await resolveName(name, readConfig);
+    if (resolved === null || canonicalAddress(resolved) !== account)
+      throw new Error("Forward resolution is not confirmed. Check records before continuing.");
+    if (step === "name")
+      return (
+        decodeString(await call(options.provider, resolver, "name(bytes32)", bytes32Word(node))) !==
+        name
+      );
+    await requireSpelling();
+    // A broken previous primary remains repairable; transport and reverse reads stay strict.
+    const primaryState = await readPrimaryState(account, registry, options.provider);
+    if (primaryState.reverseName === name && primaryState.primary !== name)
+      throw new IncompleteRegistrationError();
+    return primaryState.primary !== name;
+  }
+  for (const { step, required } of plan) {
+    await assertSigner(options);
+    const state = await readRegistrationState(name, account, options);
+    if (step !== "register" && state.owner !== account)
+      throw new Error("Name ownership changed. Check the name before continuing.");
+    if (completed.some((previous) => !state.complete[previous]))
+      throw new IncompleteRegistrationError();
+    if (state.required[step] !== required) throw changed();
+    if ((await requiresWrite(step)) !== required) throw changed();
+    if (!required) {
+      if (!state.complete[step]) throw new IncompleteRegistrationError();
+      options.onUpdate({ step, status: "skipped" });
+    } else {
+      if (step === "register" && !(await isAvailable(name, options)))
+        throw new Error("This name is no longer available");
+      await send(step, name, options);
+    }
+    completed.push(step);
+    if (step === "name") {
+      await requireSpelling();
+      await requireOwner();
+    }
+    if (step === "primary" && (await verifyReverse(account, readConfig)) !== name)
+      throw new Error("Primary name verification failed");
   }
   return name;
 }

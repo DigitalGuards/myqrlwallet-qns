@@ -66,15 +66,18 @@ describe("registration page", () => {
     expect(screen.getByText("alice.qrl", { selector: "dd" })).toBeDefined();
     fireEvent.click(screen.getByLabelText("Use as my primary name"));
     fireEvent.click(screen.getByRole("button", { name: "Claim name" }));
-    await screen.findByText("alice.qrl now resolves to your address. Your primary name is set.");
+    await screen.findByText(
+      "alice.qrl is ready. It resolves to your address and is your primary name.",
+    );
     expect(chain.sent).toHaveLength(5);
-    expect(screen.getAllByText("Confirmed", { selector: "span" })).toHaveLength(5);
+    expect(screen.getAllByText("Done", { selector: "dd" })).toHaveLength(5);
     expect(
       screen
         .getAllByRole("link")
         .filter((link) => link.getAttribute("href")?.startsWith("https://zondscan.com/tx/")),
     ).toHaveLength(5);
-    await screen.findByRole("link", { name: "Set up this name" });
+    await screen.findByText("Ready and your primary name");
+    expect(screen.queryByRole("button", { name: "Complete name setup" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Name or QRL address"), {
       target: { value: "ALICE.qrl" },
     });
@@ -97,12 +100,12 @@ describe("registration page", () => {
     expect(chain.owners.get(registrationName("alice").node)).toBe(ACCOUNT);
     expect(screen.getByText("Owned by you", { selector: "dd" })).toBeDefined();
     expect(screen.queryByText("Available", { selector: "dd" })).toBeNull();
-    expect(screen.getByText("Confirmed", { selector: "span" })).toBeDefined();
+    expect(screen.getByText("Done", { selector: "dd" })).toBeDefined();
     chain.rejectSend = 0;
     fireEvent.click(screen.getByRole("button", { name: "Complete name setup" }));
-    await screen.findByText("alice.qrl now resolves to your address.");
+    await screen.findByText("alice.qrl is ready. It resolves to your address.");
     expect(chain.sent).toHaveLength(4);
-    expect(screen.getByText("Already complete")).toBeDefined();
+    expect(screen.getByText("Skipped")).toBeDefined();
   });
   it.each(["reverted", "rejected"] as const)(
     "refreshes a name taken during approval after the claim is %s",
@@ -123,7 +126,7 @@ describe("registration page", () => {
       await renderConnected(chain);
       await searchName();
       fireEvent.click(screen.getByRole("button", { name: "Claim name" }));
-      await screen.findByText("Approve in your wallet");
+      await screen.findByText("Approve in your wallet now");
       chain.seed("alice", OTHER);
       if (failure === "reverted") chain.receiptStatus = "0x0";
       else chain.rejectSend = 1;
@@ -133,7 +136,7 @@ describe("registration page", () => {
         finish();
         await Promise.resolve();
       });
-      await screen.findByText("Failed", { selector: "span" });
+      await screen.findByText("Failed", { selector: "dd" });
       await screen.findByText("Registered", { selector: "dd" });
       expect(screen.getByText(OTHER, { selector: "dd" })).toBeDefined();
       expect(screen.queryByText("Available", { selector: "dd" })).toBeNull();
@@ -305,7 +308,7 @@ describe("registration page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard pending state" }));
     await searchName();
     fireEvent.click(screen.getByRole("button", { name: "Claim name" }));
-    await screen.findByText("alice.qrl now resolves to your address.");
+    await screen.findByText("alice.qrl is ready. It resolves to your address.");
     expect(chain.sent).toHaveLength(4);
   });
   it("shows the connected account's own pending state", async () => {
@@ -356,7 +359,7 @@ describe("registration page", () => {
     const { chain } = await renderConnected(new UnrelatedChain());
     fireEvent.click(screen.getByRole("button", { name: "Check confirmation" }));
     await screen.findByText(/does not match the pending step/);
-    expect(screen.queryByText("Confirmed", { selector: "span" })).toBeNull();
+    expect(screen.queryByText("Done", { selector: "dd" })).toBeNull();
     expect(chain.owners.size).toBe(0);
   });
 });
@@ -427,6 +430,11 @@ describe("pending claim recovery", () => {
       await screen.findByText("Owned by you");
       expect(screen.queryByText(/Old network read failed/)).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Re-check name state" }));
+      await screen.findByText(
+        "Confirmation is still pending. Re-check name state or discard pending state to continue.",
+      );
+      expect(readPendingClaim(config, ACCOUNT)).toMatchObject(saved);
+      fireEvent.click(screen.getByRole("button", { name: "Discard pending state" }));
       await screen.findByText("Owned by you");
       expect(readPendingClaim(config, ACCOUNT)).toBeNull();
       expect(
@@ -434,7 +442,7 @@ describe("pending claim recovery", () => {
       ).toBe(false);
     },
   );
-  it("recovers an unseen hash without a nonce from the confirmed name state", async () => {
+  it("keeps an unseen hash without a nonce until explicitly discarded", async () => {
     const chain = new MockChain();
     chain.seed("alice", ACCOUNT);
     savePendingClaim(config, {
@@ -444,10 +452,15 @@ describe("pending claim recovery", () => {
     });
     await renderConnected(chain);
     fireEvent.click(screen.getByRole("button", { name: "Check confirmation" }));
+    await screen.findByText(
+      "Confirmation is still pending. Re-check name state or discard pending state to continue.",
+    );
+    expect(readPendingClaim(config, ACCOUNT)?.update.hash).toBe(`0x${"d".repeat(64)}`);
+    fireEvent.click(screen.getByRole("button", { name: "Discard pending state" }));
     await screen.findByText("Owned by you");
     expect(readPendingClaim(config, ACCOUNT)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Complete name setup" }));
-    await screen.findByText("alice.qrl now resolves to your address.");
+    await screen.findByText("alice.qrl is ready. It resolves to your address.");
     expect(chain.sent).toHaveLength(3);
   });
   it.each([false, true])(
@@ -474,25 +487,33 @@ describe("pending claim recovery", () => {
       fireEvent.click(
         screen.getByRole("button", { name: registered ? "Complete name setup" : "Claim name" }),
       );
-      await screen.findByText("alice.qrl now resolves to your address. Your primary name is set.");
+      await screen.findByText(
+        "alice.qrl is ready. It resolves to your address and is your primary name.",
+      );
       expect(chain.sent).toHaveLength(registered ? 4 : 5);
     },
   );
-  it("rechecks name state directly and resumes with only the missing records", async () => {
+  it("rechecks name state after nonce settlement and resumes with only the missing records", async () => {
     const chain = new MockChain();
     chain.seed("alice", ACCOUNT);
     chain.resolvers.set(registrationName("alice").node, config.contracts.QRLPublicResolver ?? "");
+    chain.confirmedNonce = 1n;
     savePendingClaim(config, {
       name: "alice.qrl",
       account: ACCOUNT,
-      update: { step: "resolver", status: "unconfirmed", hash: `0x${"d".repeat(64)}` },
+      update: {
+        step: "resolver",
+        status: "unconfirmed",
+        hash: `0x${"d".repeat(64)}`,
+        nonce: "0x0",
+      },
     });
     await renderConnected(chain);
     fireEvent.click(screen.getByRole("button", { name: "Re-check name state" }));
-    await screen.findByText(/Name records were checked/);
+    await screen.findByText(/The saved nonce has been used/);
     expect(readPendingClaim(config, ACCOUNT)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Complete name setup" }));
-    await screen.findByText("alice.qrl now resolves to your address.");
+    await screen.findByText("alice.qrl is ready. It resolves to your address.");
     expect(chain.sent).toHaveLength(2);
   });
   it("restores separate pending claims when switching accounts in both directions", async () => {
@@ -575,7 +596,7 @@ describe("pending claim recovery", () => {
         await waitFor(() => {
           expect(readPendingClaim(config, ACCOUNT)?.update.hash).toBe(hash);
         });
-        expect(screen.queryByText("Confirmed", { selector: "span" })).toBeNull();
+        expect(screen.queryByText("Done", { selector: "dd" })).toBeNull();
       } else
         await waitFor(() => {
           expect(readPendingClaim(config, ACCOUNT)).toBeNull();
