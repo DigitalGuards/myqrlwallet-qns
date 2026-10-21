@@ -135,12 +135,14 @@ export class WalletController {
   };
   private listeners = new Set<() => void>();
   private relay: Relay | null = null;
-  private relayTransition: Promise<void> = Promise.resolve();
+  private relayRetirement: Promise<void> | null = null;
   private extension: {
     choice: WalletChoice;
     session: ExtensionSession;
     ready: Promise<void> | null;
     activation: number;
+    cancelActivation: (() => void) | null;
+    explicitDisconnect: boolean;
     waiting: boolean;
     closing: Promise<void> | null;
   } | null = null;
@@ -196,6 +198,7 @@ export class WalletController {
     this.expectedLateResponse = undefined;
     this.mode = null;
     this.authorizing = null;
+    this.extension?.cancelActivation?.();
     this.extension?.session.dispose();
     this.extension = null;
     this.extensionChainId = null;
@@ -226,7 +229,7 @@ export class WalletController {
       this.mode = "relay";
       const relay = this.getRelay();
       if (relay.hasStoredSession()) {
-        this.update({ provider: relay, transport: "relay", status: "Reconnecting" });
+        this.update({ status: "Reconnecting" });
         if (relay.isConnected()) this.authorizeRelay();
       } else {
         this.remember(null);
@@ -235,6 +238,7 @@ export class WalletController {
     }
     return () => {
       window.removeEventListener("eip6963:announceProvider", announce);
+      this.extension?.cancelActivation?.();
       this.extension?.session.dispose();
       this.extension = null;
       for (const remove of this.relaySubscriptions) remove();
@@ -274,14 +278,14 @@ export class WalletController {
         if (this.mode === "relay" && !this.state.busy) this.authorizeRelay();
       }),
       relay.listen("accountsChanged", (accounts) => {
-        if (this.mode === "relay" && !this.state.busy) this.relayAccountsChanged(accounts, relay);
+        if (this.mode === "relay" && !this.state.busy)
+          this.accountsChanged(accounts, relay, "relay");
       }),
       relay.listen("chainChanged", () => {
         if (this.mode === "relay") this.update({ revision: this.state.revision + 1 });
       }),
       relay.listen("statusChanged", (status) => {
-        if (this.mode === "relay" && !this.state.busy && typeof status === "string")
-          this.update({ status });
+        if (this.mode === "relay" && typeof status === "string") this.update({ status });
       }),
       relay.listen("disconnect", () => {
         if (this.mode !== "relay" || this.state.busy) return;
@@ -295,15 +299,11 @@ export class WalletController {
     ];
     return relay;
   }
-  private queueRelay<T>(operation: () => Promise<T>): Promise<T> {
-    const work = this.relayTransition.then(operation);
-    this.relayTransition = work.then(
-      () => {},
-      () => {},
-    );
-    return work;
-  }
-  private relayAccountsChanged(accounts: unknown, provider: WalletProvider): void {
+  private accountsChanged(
+    accounts: unknown,
+    provider: WalletProvider,
+    transport: "extension" | "relay",
+  ): void {
     try {
       const account = requireAccount(accounts);
       if (account !== this.state.account) this.expectedLateResponse = undefined;
@@ -311,15 +311,20 @@ export class WalletController {
         lateTransaction: null,
         account,
         provider,
-        transport: "relay",
+        transport,
         uri: null,
         status: "Connected",
         error: null,
         revision: this.state.revision + (account === this.state.account ? 0 : 1),
       });
     } catch {
-      this.update({ account: null, provider: null, revision: this.state.revision + 1 });
-      void this.disconnect();
+      if (transport === "relay") {
+        this.update({ account: null, provider: null, revision: this.state.revision + 1 });
+        void this.disconnect();
+      } else {
+        this.remember(null);
+        this.clear();
+      }
     }
   }
   private authorizeRelay(): void {
@@ -375,7 +380,7 @@ export class WalletController {
       } catch (cause) {
         status = errorMessage(cause);
       }
-    } else if (state.status === "disconnected" && error && this.state.status === "Disconnecting")
+    } else if (state.status === "disconnected" && error && this.extension?.explicitDisconnect)
       error = `Disconnected on this page. The wallet reported: ${error}`;
 
     const provider = active ? choice.provider : null;
@@ -424,7 +429,7 @@ export class WalletController {
     );
   }
   async connectExtension(choice = this.extension?.choice, restore = false): Promise<void> {
-    if (!choice) return;
+    if (!choice || (this.state.busy && this.mode !== "extension")) return;
     this.remember(choice.id);
     if (this.extension?.choice.provider !== choice.provider) {
       this.clear();
@@ -463,14 +468,23 @@ export class WalletController {
       this.extension = {
         choice,
         session,
-        ready: relay ? this.queueRelay(() => relay.disconnect()) : null,
+        ready: relay
+          ? (this.relayRetirement ??= Promise.resolve().then(() => relay.disconnect()))
+          : null,
         activation: 0,
+        cancelActivation: null,
+        explicitDisconnect: false,
         waiting: false,
         closing: null,
       };
     }
     const selected = this.extension;
+    selected.cancelActivation?.();
     const activation = ++selected.activation;
+    const cancelled = new Promise<void>((resolve) => {
+      selected.cancelActivation = resolve;
+    });
+    selected.explicitDisconnect = false;
     selected.waiting = true;
     this.mode = "extension";
     if (this.state.account !== null) this.expectedLateResponse = undefined;
@@ -484,8 +498,9 @@ export class WalletController {
       revision: this.state.revision + (this.state.account === null ? 0 : 1),
     });
     try {
-      if (selected.ready) await selected.ready;
+      if (selected.ready) await Promise.race([selected.ready, cancelled]);
       if (this.extension !== selected || selected.activation !== activation) return;
+      if (this.relayRetirement === selected.ready) this.relayRetirement = null;
       const barrier = this.revocationBarrier(choice.provider);
       if (barrier) {
         this.update({
@@ -493,7 +508,7 @@ export class WalletController {
           busy: true,
           status: `Finishing disconnect in ${choice.name}`,
         });
-        const settled = await barrier;
+        const settled = await Promise.race([barrier, cancelled]);
         if (this.extension !== selected || selected.activation !== activation) return;
         if (!settled) {
           this.remember(null);
@@ -503,35 +518,44 @@ export class WalletController {
         }
       }
       selected.waiting = false;
-      await (restore ? selected.session.restore() : selected.session.connect());
+      await Promise.race([
+        restore ? selected.session.restore() : selected.session.connect(),
+        cancelled,
+      ]);
     } catch (error) {
       if (this.extension === selected && selected.activation === activation) {
+        if (this.relayRetirement === selected.ready) this.relayRetirement = null;
         this.remember(null);
         this.clear();
         if (!restore) this.update({ error: errorMessage(error) });
+      }
+    } finally {
+      if (selected.activation === activation) {
+        selected.cancelActivation?.();
+        selected.cancelActivation = null;
       }
     }
   }
   async pair(fresh = false): Promise<void> {
     if (this.state.busy && this.mode !== "extension") return;
-    this.remember("relay");
     this.clear();
     this.mode = "relay";
     const generation = this.generation;
+    this.update({ busy: true, error: null, status: "Preparing connection" });
     try {
       const relay = this.getRelay();
-      this.update({
-        provider: relay,
-        transport: "relay",
-        busy: true,
-        error: null,
-        status: "Preparing connection",
-      });
-      const uri = await this.queueRelay(() => {
-        if (generation !== this.generation) return Promise.resolve(null);
-        return fresh ? relay.newConnection() : relay.getConnectionURI();
-      });
-      if (generation !== this.generation || uri === null) return;
+      // Extension selection may still be retiring this relay's previous channel.
+      const retirement = this.relayRetirement;
+      if (retirement) {
+        try {
+          await retirement;
+        } finally {
+          if (this.relayRetirement === retirement) this.relayRetirement = null;
+        }
+        if (generation !== this.generation) return;
+      }
+      const uri = fresh ? await relay.newConnection() : await relay.getConnectionURI();
+      if (generation !== this.generation) return;
       this.remember("relay");
       this.update({ uri, status: "Waiting for wallet", busy: false });
       if (relay.isConnected()) this.authorizeRelay();
@@ -552,11 +576,14 @@ export class WalletController {
     }
   }
   async disconnect(): Promise<void> {
-    this.remember(null);
     if (this.mode === "extension" && this.extension) {
       // Cancel activation even when the previous relay is still retiring.
       const selected = this.extension;
+      this.remember(null);
+      selected.explicitDisconnect = true;
       selected.activation++;
+      selected.cancelActivation?.();
+      selected.cancelActivation = null;
       selected.waiting = false;
       if (selected.closing) {
         await selected.closing;
@@ -577,14 +604,15 @@ export class WalletController {
       if (selected.closing === work) selected.closing = null;
       return;
     }
+    if (this.state.busy) return;
     const wasRelay = this.mode === "relay";
-    this.clear();
-    const generation = this.generation;
-    const relay = this.relay;
+    this.update({ busy: true });
     try {
-      if (wasRelay && relay) await this.queueRelay(() => relay.disconnect());
+      if (wasRelay && this.relay) await this.relay.disconnect();
+      this.remember(null);
+      this.clear();
     } catch (error) {
-      if (generation === this.generation) this.update({ error: errorMessage(error) });
+      this.update({ error: errorMessage(error), busy: false });
     }
   }
 }

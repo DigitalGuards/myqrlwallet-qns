@@ -92,7 +92,7 @@ it.each(["revocation", "relay"])(
   },
 );
 
-it("keeps Disconnect available during relay preparation and cancels its pending result", async () => {
+it("keeps the wallet control disabled during relay preparation", async () => {
   const { controller, relay } = setup();
   const uri = deferred<string>();
   vi.spyOn(relay, "getConnectionURI").mockReturnValue(uri.promise);
@@ -102,21 +102,24 @@ it("keeps Disconnect available during relay preparation and cancels its pending 
     await flush();
   });
   try {
-    const disconnect = within(screen.getByRole("banner")).getByRole("button", {
-      name: "Disconnect",
+    const connecting = within(screen.getByRole("banner")).getByRole("button", {
+      name: "Connecting...",
     });
-    expect(disconnect.hasAttribute("disabled")).toBe(false);
+    expect(connecting.hasAttribute("disabled")).toBe(true);
     await act(async () => {
-      fireEvent.click(disconnect);
+      fireEvent.click(connecting);
       await flush();
     });
-    expect(screen.getByText("Disconnected", { selector: "dd" })).toBeDefined();
+    expect(screen.getByText("Preparing connection", { selector: "dd" })).toBeDefined();
   } finally {
     await act(async () => {
       uri.resolve("qrlconnect://?q=cancelled");
       await pairing;
     });
   }
-  expect(controller.getSnapshot()).toMatchObject({ status: "Disconnected", uri: null });
-  expect(relay.disconnected).toBe(1);
+  expect(controller.getSnapshot()).toMatchObject({
+    status: "Waiting for wallet",
+    uri: "qrlconnect://?q=cancelled",
+  });
+  expect(relay.disconnected).toBe(0);
 });

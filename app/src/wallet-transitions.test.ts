@@ -166,10 +166,10 @@ it.each([false, true])(
       await flush();
       expect(controller.getSnapshot().error).toBeNull();
       expect(pairingApi).not.toHaveBeenCalled();
-      expect(localStorage.getItem(storageKey)).toBe("relay");
+      expect(localStorage.getItem(storageKey)).toBe(choice.id);
       expect(controller.getSnapshot()).toMatchObject({
         status: "Preparing connection",
-        transport: "relay",
+        transport: null,
         busy: true,
         error: null,
       });
@@ -219,7 +219,7 @@ it("keeps selection and controls while the reused helper completes an earlier re
   }
 });
 
-it("cancels pairing queued behind teardown before calling the actual SDK pairing API", async () => {
+it("preserves busy pairing while extension-triggered relay retirement is pending", async () => {
   const { choice } = extension();
   const retirement = deferred<undefined>();
   const teardown = vi
@@ -240,21 +240,26 @@ it("cancels pairing queued behind teardown before calling the actual SDK pairing
   try {
     expect(controller.getSnapshot()).toMatchObject({
       transport: null,
-      status: "Disconnected",
-      busy: false,
+      status: "Preparing connection",
+      busy: true,
     });
   } finally {
     retirement.resolve(undefined);
     await Promise.all([switching, pairing, closing]);
   }
-  expect(pairingApi).not.toHaveBeenCalled();
-  expect(teardown).toHaveBeenCalledTimes(2);
-  expect(controller.getSnapshot()).toMatchObject({ uri: null, error: null });
-  expect(localStorage.getItem(storageKey)).toBeNull();
+  expect(pairingApi).toHaveBeenCalledOnce();
+  expect(teardown).toHaveBeenCalledOnce();
+  expect(controller.getSnapshot()).toMatchObject({
+    uri: "qrlconnect://?q=cancelled",
+    status: "Waiting for wallet",
+    busy: false,
+    error: null,
+  });
+  expect(localStorage.getItem(storageKey)).toBe("relay");
 });
 
 it.each(["extension", "disconnect"])(
-  "waits for actual SDK pairing before %s and ignores the cancelled pairing result",
+  "keeps actual SDK pairing busy when %s is requested",
   async (selection) => {
     const { choice } = extension();
     const uri = deferred<string>();
@@ -272,24 +277,71 @@ it.each(["extension", "disconnect"])(
     const switching =
       selection === "extension" ? controller.connectExtension(choice) : controller.disconnect();
     try {
-      expect(localStorage.getItem(storageKey)).toBe(selection === "extension" ? choice.id : null);
+      expect(localStorage.getItem(storageKey)).toBeNull();
       expect(controller.getSnapshot()).toMatchObject({
-        transport: selection === "extension" ? "extension" : null,
+        transport: null,
         account: null,
         uri: null,
+        status: "Preparing connection",
+        busy: true,
       });
       expect(teardown).not.toHaveBeenCalled();
     } finally {
       uri.resolve("qrlconnect://?q=cancelled");
       await Promise.all([pairing, switching]);
     }
-    expect(teardown).toHaveBeenCalledOnce();
+    expect(teardown).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toMatchObject({
-      account: selection === "extension" ? ACCOUNT : null,
-      uri: null,
-      status: selection === "extension" ? "Connected" : "Disconnected",
+      account: null,
+      uri: "qrlconnect://?q=cancelled",
+      status: "Waiting for wallet",
       error: null,
       busy: false,
     });
+    expect(localStorage.getItem(storageKey)).toBe("relay");
+  },
+);
+
+it.each([false, true])(
+  "reports failed extension-triggered relay retirement and preserves retry (fresh=%s)",
+  async (fresh) => {
+    const { choice, provider } = extension();
+    const retirement = deferred<undefined>();
+    const failure = new Error("Unable to retire the relay channel");
+    const teardown = vi
+      .spyOn(ConnectionManager.prototype, "disconnect")
+      .mockReturnValueOnce(retirement.promise)
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue();
+    const pairingApi = vi
+      .spyOn(ConnectionManager.prototype, "getConnectionURI")
+      .mockResolvedValue("qrlconnect://?q=retried");
+    vi.spyOn(ConnectionManager.prototype, "resetForNewChannel").mockResolvedValue();
+    localStorage.setItem(storageKey, "relay");
+    const controller = new WalletController(config, (options) =>
+      createRelay({ ...options, autoReconnect: false }),
+    );
+    stops.push(controller.start());
+    const switching = controller.connectExtension(choice);
+    await flush();
+    const pairing = controller.pair(fresh);
+    retirement.reject(failure);
+    await Promise.all([switching, pairing]);
+    expect(pairingApi).not.toHaveBeenCalled();
+    expect(provider.calls).toHaveLength(0);
+    expect(controller.getSnapshot()).toMatchObject({ error: failure.message, busy: false });
+    expect(teardown).toHaveBeenCalledTimes(2);
+    await controller.disconnect();
+    expect(teardown).toHaveBeenCalledTimes(3);
+    expect(localStorage.getItem(storageKey)).toBeNull();
+    await controller.pair(fresh);
+    expect(pairingApi).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot()).toMatchObject({
+      uri: "qrlconnect://?q=retried",
+      status: "Waiting for wallet",
+      busy: false,
+      error: null,
+    });
+    expect(localStorage.getItem(storageKey)).toBe("relay");
   },
 );
