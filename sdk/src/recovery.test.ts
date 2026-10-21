@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ACCOUNT, OTHER, config, MockChain } from "./__tests__/mockProvider.js";
-import { addressWord, bytes32Word, selector } from "./abi.js";
+import { addressWord, bytes32Word, isRecord, selector } from "./abi.js";
 import {
   checkRegistrationTransaction,
   readRegistrationState,
   registerName,
   registrationName,
   registrationTransaction,
+  TransactionMismatchError,
   type RegistrationStep,
   type TransactionUpdate,
 } from "./registration.js";
@@ -97,7 +98,33 @@ describe("transaction recovery", () => {
     provider.transaction = { ...expected, input: expected.data, hash, nonce: "0x7", ...patch };
     await expect(
       checkRegistrationTransaction("alice", ACCOUNT, pending, { config, provider }),
-    ).rejects.toThrow("does not match the pending step");
+    ).rejects.toThrow(TransactionMismatchError);
+  });
+  it("classifies a mismatched wallet hash during an active claim", async () => {
+    class WrongSenderChain extends MockChain {
+      override async request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
+        const result = await super.request(args);
+        return args.method === "qrl_getTransactionByHash" && isRecord(result)
+          ? { ...result, from: OTHER }
+          : result;
+      }
+    }
+    const provider = new WrongSenderChain();
+    const updates: TransactionUpdate[] = [];
+    await expect(
+      registerName("alice", {
+        config,
+        provider,
+        wallet: provider,
+        account: ACCOUNT,
+        transport: "extension",
+        primary: false,
+        onUpdate: (update) => updates.push(update),
+      }),
+    ).rejects.toThrow(TransactionMismatchError);
+    expect(updates.at(-1)).toMatchObject({ step: "register", status: "mismatched" });
+    expect(updates.at(-1)?.hash).toBeDefined();
+    expect(provider.sent).toHaveLength(1);
   });
   it("stops an active claim as soon as its nonce is mined elsewhere", async () => {
     const provider = new MockChain();
@@ -118,7 +145,7 @@ describe("transaction recovery", () => {
       }),
     ).rejects.toThrow("saved nonce has been used");
     expect(provider.sent).toHaveLength(1);
-    expect(updates.at(-1)).toMatchObject({ step: "register", status: "unconfirmed", nonce: "0x0" });
+    expect(updates.at(-1)).toMatchObject({ step: "register", status: "replaced", nonce: "0x0" });
   });
   it.each(transports)("reads the %s wallet's nonce after submission", async (transport) => {
     const provider = new MockChain();
@@ -181,7 +208,7 @@ describe("transaction recovery", () => {
       }),
     ).rejects.toThrow("saved nonce has been used");
     expect(provider.reads).toBe(2);
-    expect(updates.at(-1)).toMatchObject({ status: "unconfirmed", nonce: "0x7" });
+    expect(updates.at(-1)).toMatchObject({ status: "replaced", nonce: "0x7" });
   });
   it("keeps an unseen hash without a guessed nonce for name-state recovery", async () => {
     class UnseenTransaction extends MockChain {

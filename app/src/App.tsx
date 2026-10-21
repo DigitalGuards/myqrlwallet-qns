@@ -17,19 +17,22 @@ import {
   normalize,
   registerName,
   registrationName,
+  registrationPlan,
+  type RegistrationPlan,
   requireContract,
   resolveName,
   verifyReverse,
   checkRegistrationTransaction,
   readRegistrationState,
-  isNonceConsumed,
+  TransactionMismatchError,
+  RevertedTransactionError,
   type NetworkConfig,
   type OwnedName,
-  type RegistrationStep,
   type RpcProvider,
   type TransactionUpdate,
 } from "@qns/sdk";
 import { errorMessage } from "./rpc";
+import { decideRecovery, type RecoveryCheck, type RecoveryRecords } from "./recovery";
 import {
   knownNames,
   readPendingClaim,
@@ -38,24 +41,57 @@ import {
   type PendingClaim,
 } from "./storage";
 import { WalletController } from "./wallet";
-import { useNameState } from "./useNameState";
+import { useNameState, type NameResult } from "./useNameState";
+import {
+  ClaimProgress,
+  ClaimSummary,
+  remainingApprovals,
+  setupComplete,
+  transactionOutcomes,
+  transactionInFlight,
+} from "./ClaimProgress";
 
 const PairingModal = lazy(async () => ({ default: (await import("./PairingModal")).PairingModal }));
-const stepLabels: Record<RegistrationStep, string> = {
-  register: "Claim name",
-  resolver: "Select resolver",
-  address: "Set address",
-  name: "Save name",
-  primary: "Set primary name",
-};
-const statusLabels = {
-  approval: "Approve in your wallet",
-  pending: "Waiting for confirmation",
-  confirmed: "Confirmed",
-  skipped: "Already complete",
-  failed: "Failed",
-  unconfirmed: "Confirmation pending",
-};
+
+interface ClaimScope {
+  name: string;
+  node: string;
+  account: string;
+  requestId: string | number;
+  attemptId?: string;
+}
+
+function claimScope(claim: PendingClaim): ClaimScope {
+  const { name, node } = registrationName(claim.name);
+  return {
+    name,
+    node,
+    account: claim.account,
+    requestId:
+      claim.attemptId ??
+      claim.update.requestId ??
+      `recovery:${node}:${claim.update.step}:${claim.update.nonce ?? "unknown"}`,
+    ...(claim.attemptId ? { attemptId: claim.attemptId } : {}),
+  };
+}
+
+function sameClaimRequest(left: ClaimScope, right: ClaimScope): boolean {
+  return (
+    left.node === right.node && left.account === right.account && left.requestId === right.requestId
+  );
+}
+
+function ownedNameStatus(name: OwnedName, account: string | null, config: NetworkConfig): string {
+  if (name.records === null) return name.error;
+  if (name.records.resolverStatus === "unusable") return "Resolver not usable";
+  if (!name.records.address) return "Address record missing";
+  if (name.records.address !== account) return "Address record needs updating";
+  if (name.records.resolver !== config.contracts.QRLPublicResolver)
+    return "Records contract needs setup";
+  if (!name.records.spelling) return "Name text missing";
+  if (name.records.spelling !== name.name) return "Name text needs updating";
+  return name.primary ? "Ready and your primary name" : "Ready";
+}
 
 function Row({
   label,
@@ -160,7 +196,7 @@ export function App({
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletReady, setWalletReady] = useState(false);
   const [input, setInput] = useState("");
-  const { search, searching, searchError, refreshName } = useNameState(
+  const { search, searching, searchError, readErrorName, refreshName, getSelection } = useNameState(
     config,
     provider,
     controller,
@@ -170,9 +206,18 @@ export function App({
   latestRefreshName.current = refreshName;
   const [primary, setPrimary] = useState(false);
   const [claiming, setClaiming] = useState(false);
-  const [claimError, setClaimError] = useState<string | null>(null);
-  const [claimed, setClaimed] = useState<{ name: string; primary: boolean } | null>(null);
-  const [updates, setUpdates] = useState<TransactionUpdate[]>([]);
+  const [claimError, setClaimError] = useState<{ scope: ClaimScope; message: string } | null>(null);
+  const [flow, setFlow] = useState<
+    | (ClaimScope & {
+        primary: boolean;
+        plan?: RegistrationPlan;
+      })
+    | null
+  >(null);
+  const [updateState, setUpdateState] = useState<{
+    scope: ClaimScope;
+    items: TransactionUpdate[];
+  } | null>(null);
   const [pendingState, setPendingState] = useState<{
     config: NetworkConfig;
     claim: PendingClaim | null;
@@ -181,14 +226,18 @@ export function App({
     pendingState.config === config && pendingState.claim?.account === wallet.account
       ? pendingState.claim
       : null;
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
   function setPending(claim: PendingClaim | null): void {
+    pendingRef.current = claim;
     setPendingState({ config, claim });
   }
   const [checkingPending, setCheckingPending] = useState(false);
-  const pendingCheck = useRef<object | null>(null);
+  const pendingCheck = useRef<{ node: string; requestId: string } | null>(null);
   const [recoveryHash, setRecoveryHash] = useState("");
   const operation = useRef<AbortController | null>(null);
   const claimLock = useRef(false);
+  const claimCard = useRef<HTMLElement>(null);
   const [names, setNames] = useState<OwnedName[]>([]);
   const [namesLoading, setNamesLoading] = useState(false);
   const [namesError, setNamesError] = useState<string | null>(null);
@@ -198,6 +247,23 @@ export function App({
   const [looking, setLooking] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const lookupGeneration = useRef(0);
+
+  function activeClaim(scope: ClaimScope): boolean {
+    const selection = getSelection();
+    return (
+      isCurrentContext() &&
+      controller.getSnapshot().account === scope.account &&
+      controller.getSnapshot().revision === wallet.revision &&
+      (selection.node === scope.node ||
+        (selection.requestId === 0 &&
+          pendingRef.current !== null &&
+          sameClaimRequest(claimScope(pendingRef.current), scope)))
+    );
+  }
+  function claimMessage(scope: ClaimScope, message: string | null): void {
+    if (isCurrentContext() && controller.getSnapshot().account === scope.account)
+      setClaimError(message === null ? null : { scope, message });
+  }
 
   useEffect(() => controller.start(), [controller]);
   useEffect(() => {
@@ -218,17 +284,20 @@ export function App({
       controller.clearLateTransaction();
       return;
     }
+    const scope = claimScope(pending);
     if (response.rejected) {
-      setPending(null);
-      savePendingClaim(config, null, pending.account);
-      setClaimError("Request declined in your wallet. You can continue when ready.");
+      recordUpdate(scope, { ...pending.update, status: "failed" }, pending.primary);
+      claimMessage(scope, "Request declined in your wallet. You can continue when ready.");
     } else if (response.hash) {
       const next: PendingClaim = {
         ...pending,
-        update: { ...pending.update, hash: response.hash, status: "unconfirmed" },
+        update: {
+          ...pending.update,
+          hash: response.hash,
+          status: pending.update.status === "approval" ? "unconfirmed" : pending.update.status,
+        },
       };
-      setPending(next);
-      savePendingClaim(config, next);
+      recordUpdate(scope, next.update, next.primary);
     }
     void refreshName();
     controller.clearLateTransaction();
@@ -250,7 +319,7 @@ export function App({
   }, [config, provider, networkRevision]);
   useEffect(() => {
     setPending(readPendingClaim(config, wallet.account));
-    setUpdates([]);
+    setUpdateState(null);
     setRecoveryHash("");
     setClaimError(null);
     setCheckingPending(false);
@@ -262,7 +331,8 @@ export function App({
   }, [wallet.account, config]);
   useEffect(() => {
     operation.current?.abort();
-    setClaimed(null);
+    setFlow(null);
+    setUpdateState(null);
     let active = true;
     setWalletReady(false);
     setWalletError(null);
@@ -278,7 +348,7 @@ export function App({
       active = false;
       operation.current?.abort();
     };
-  }, [wallet.provider, wallet.account, wallet.revision, config]);
+  }, [wallet.provider, wallet.account, wallet.revision, config, provider, controller]);
   useEffect(() => {
     const abort = new AbortController();
     setNames([]);
@@ -291,7 +361,8 @@ export function App({
           if (!abort.signal.aborted) setNames(items);
         })
         .catch((error: unknown) => {
-          if (!abort.signal.aborted) setNamesError(errorMessage(error));
+          if (!abort.signal.aborted)
+            setNamesError(`Could not read your names: ${errorMessage(error)}`);
         })
         .finally(() => {
           if (!abort.signal.aborted) setNamesLoading(false);
@@ -300,36 +371,41 @@ export function App({
     return () => {
       abort.abort();
     };
-  }, [wallet.account, config, provider, network.ready, refresh]);
+  }, [wallet.account, wallet.revision, config, provider, network.ready, refresh]);
 
   async function searchName(event: SyntheticEvent): Promise<void> {
     event.preventDefault();
-    setClaimed(null);
+    setFlow(null);
     setClaimError(null);
+    setUpdateState(null);
     const result = await refreshName(input);
     if (result) {
       rememberName(config, result.name);
       setRefresh((value) => value + 1);
     }
   }
-  function recordUpdate(
-    name: string,
-    account: string,
-    update: TransactionUpdate,
-    makePrimary = primary,
-    attemptId?: string,
-  ): void {
+  function recordUpdate(scope: ClaimScope, update: TransactionUpdate, makePrimary = primary): void {
+    const { name, account, attemptId } = scope;
+    const saved = readPendingClaim(config, account);
+    if (saved && !sameClaimRequest(claimScope(saved), scope)) return;
     const visible = isCurrentContext() && controller.getSnapshot().account === account;
-    if (visible)
-      setUpdates((items) => [...items.filter((item) => item.step !== update.step), update]);
+    if (activeClaim(scope))
+      setUpdateState((previous) => ({
+        scope,
+        items: [
+          ...(previous && sameClaimRequest(previous.scope, scope)
+            ? previous.items.filter((item) => item.step !== update.step)
+            : []),
+          update,
+        ],
+      }));
     // Settlement refreshes the current selection through the latest wallet context.
-    if (["confirmed", "skipped", "failed", "unconfirmed"].includes(update.status))
+    if (update.status !== "approval" && update.status !== "pending") {
+      rememberName(config, name);
       void latestRefreshName.current();
-    if (
-      update.status === "approval" ||
-      update.status === "pending" ||
-      update.status === "unconfirmed"
-    ) {
+      if (visible) setRefresh((value) => value + 1);
+    }
+    if (transactionOutcomes[update.status].recovery) {
       const next = {
         name,
         account,
@@ -339,15 +415,20 @@ export function App({
       };
       if (visible) setPending(next);
       savePendingClaim(config, next);
-    } else if (update.status === "confirmed" || update.status === "failed") {
+    } else if (
+      !transactionInFlight(update) &&
+      (update.status === "confirmed" || update.status === "failed")
+    ) {
       if (visible) setPending(null);
       savePendingClaim(config, null, account);
     }
   }
-  async function claim(): Promise<void> {
+  async function claim(target = search, makePrimary = primary): Promise<void> {
     if (
-      !search ||
-      (!search.available && search.owner !== wallet.account) ||
+      !target ||
+      !target.setup ||
+      (!target.available && target.owner !== wallet.account) ||
+      setupComplete(target.setup, makePrimary) ||
       !wallet.account ||
       !wallet.provider ||
       !wallet.transport ||
@@ -358,13 +439,24 @@ export function App({
     claimLock.current = true;
     const abort = new AbortController();
     operation.current = abort;
-    const name = search.name;
+    const name = target.name;
     const account = wallet.account;
     const attemptId = crypto.randomUUID();
+    const scope: ClaimScope = {
+      name,
+      node: target.node,
+      account,
+      requestId: attemptId,
+      attemptId,
+    };
     setClaiming(true);
     setClaimError(null);
-    setClaimed(null);
-    setUpdates([]);
+    const plan =
+      target === search && makePrimary === primary && searchPlan
+        ? searchPlan
+        : registrationPlan(target.setup, makePrimary);
+    setFlow({ ...scope, primary: makePrimary, plan });
+    setUpdateState(null);
     rememberName(config, name);
     try {
       await registerName(name, {
@@ -373,22 +465,23 @@ export function App({
         wallet: wallet.provider,
         account,
         transport: wallet.transport,
-        primary,
+        primary: makePrimary,
+        plan,
         signal: abort.signal,
         onUpdate: (update) => {
           // Preserve the original account's submitted operation after a wallet switch.
           const saved = readPendingClaim(config, account);
           if (abort.signal.aborted && (!saved || saved.attemptId !== attemptId)) return;
-          recordUpdate(name, account, update, primary, attemptId);
+          recordUpdate(scope, update, makePrimary);
         },
       });
       abort.signal.throwIfAborted();
-      const result = await latestRefreshName.current();
+      await latestRefreshName.current();
       abort.signal.throwIfAborted();
-      if (result?.name === name && result.owner === account) setClaimed({ name, primary });
     } catch (error) {
       if (operation.current === abort && isCurrentContext())
-        setClaimError(
+        claimMessage(
+          scope,
           abort.signal.aborted
             ? "Wallet connection changed. Confirm the current transaction, then continue with the name owner."
             : errorMessage(error),
@@ -402,60 +495,123 @@ export function App({
       }
     }
   }
+  async function continueName(name: string | null, makePrimary: boolean): Promise<void> {
+    if (!name || claimLock.current || pending || checkingPending) return;
+    const revision = controller.getSnapshot().revision;
+    setInput(name);
+    setPrimary(makePrimary);
+    setFlow(null);
+    setUpdateState(null);
+    setClaimError(null);
+    claimCard.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const result: NameResult | null = await refreshName(name);
+    if (!isCurrentContext() || controller.getSnapshot().revision !== revision) return;
+    if (result?.owner === wallet.account) await claim(result, makePrimary);
+  }
   async function recoverPending(stateOnly = false): Promise<void> {
     if (!pending || pendingCheck.current) return;
-    const check = {};
-    pendingCheck.current = check;
     const saved = pending;
+    const scope = claimScope(saved);
+    const check = { node: scope.node, requestId: crypto.randomUUID() };
+    pendingCheck.current = check;
     const revision = controller.getSnapshot().revision;
     const current = () =>
       pendingCheck.current === check &&
       isCurrentContext() &&
-      controller.getSnapshot().revision === revision;
+      controller.getSnapshot().revision === revision &&
+      pendingRef.current !== null &&
+      sameClaimRequest(claimScope(pendingRef.current), scope) &&
+      pendingRef.current.update.hash === saved.update.hash;
     setCheckingPending(true);
     setClaimError(null);
     setInput(saved.name);
+    let result: RecoveryCheck | null = null;
+    let records: RecoveryRecords | null = null;
+    const decide = () =>
+      decideRecovery(
+        saved,
+        {
+          original: saved.update.hash ? null : result,
+          tracked:
+            saved.update.hash && result
+              ? new Map([[saved.update.hash.toLowerCase(), result]])
+              : new Map(),
+        },
+        stateOnly,
+        records,
+      );
+    const snapshot = refreshName(saved.name);
+    const selection = getSelection();
+    const visible = () => current() && getSelection() === selection && activeClaim(scope);
     try {
-      await refreshName(saved.name);
+      await snapshot;
       if (!current()) return;
       const context = { config, provider };
-      const status = stateOnly
-        ? saved.update.nonce !== undefined &&
-          (await isNonceConsumed(saved.account, saved.update.nonce, context))
-          ? "replaced"
-          : "pending"
-        : await checkRegistrationTransaction(saved.name, saved.account, saved.update, context);
-      const state = await readRegistrationState(saved.name, saved.account, context);
-      if (!current()) return;
-      if (!stateOnly && status === "pending" && !state.complete[saved.update.step]) {
-        setClaimError(
-          "Confirmation is still pending. Re-check name state or discard pending state to continue.",
-        );
+      let decision = decide();
+      let appliedUpdate: TransactionUpdate | undefined;
+      if (decision.next === "check") {
+        try {
+          result = {
+            status: await checkRegistrationTransaction(
+              saved.name,
+              saved.account,
+              saved.update,
+              context,
+            ),
+          };
+        } catch (error) {
+          result = {
+            status:
+              error instanceof TransactionMismatchError
+                ? "mismatched"
+                : error instanceof RevertedTransactionError
+                  ? "reverted"
+                  : "error",
+            message: errorMessage(error),
+          };
+        }
+        if (!current()) return;
+        decision = decide();
+      }
+      if (decision.next === "read") {
+        for (const update of decision.updates) {
+          recordUpdate(scope, update, saved.primary);
+          appliedUpdate = update;
+        }
+        try {
+          records = {
+            status: "read",
+            state: await readRegistrationState(saved.name, saved.account, context),
+          };
+        } catch (error) {
+          records = { status: "error", message: errorMessage(error) };
+        }
+        if (!current()) return;
+        decision = decide();
+      }
+      claimMessage(scope, decision.showFinished ? null : decision.message);
+      if (decision.next !== "delete") {
+        for (const update of decision.updates)
+          if (update.status !== appliedUpdate?.status || update.message !== appliedUpdate.message)
+            recordUpdate(scope, update, saved.primary);
         return;
       }
-      if (!stateOnly && status === "confirmed" && !state.complete[saved.update.step]) {
-        setClaimError(
-          "The expected name record is still incomplete. Re-check name state to continue.",
-        );
+      const failed = decision.updates.find((update) => update.status === "failed");
+      if (visible()) {
+        if (!failed) setUpdateState({ scope, items: decision.updates });
+        setFlow({ ...scope, primary: saved.primary ?? false });
+        setPrimary(saved.primary ?? false);
+      }
+      if (failed) {
+        recordUpdate(scope, failed, saved.primary);
         return;
       }
-      setUpdates(
-        Object.keys(stepLabels)
-          .filter((step): step is RegistrationStep => step in state.complete)
-          .filter((step) => (step !== "primary" || saved.primary) && state.complete[step])
-          .map((step) => ({ step, status: state.complete[step] ? "skipped" : "unconfirmed" })),
-      );
-      savePendingClaim(config, null, saved.account);
-      setPending(null);
-      setPrimary(saved.primary ?? false);
-      setClaimError(
-        status === "replaced"
-          ? "The saved nonce has been used. Name records were checked; continue from the first incomplete step."
-          : "Name records were checked. Continue from the first incomplete step.",
-      );
+      rememberName(config, saved.name);
+      savePendingClaim(config, decision.pending, saved.account);
+      setPending(decision.pending);
       setRefresh((value) => value + 1);
     } catch (error) {
-      if (current()) setClaimError(errorMessage(error));
+      if (current()) claimMessage(scope, errorMessage(error));
     } finally {
       await latestRefreshName.current();
       if (pendingCheck.current === check) {
@@ -468,10 +624,13 @@ export function App({
     if (!pending) return;
     savePendingClaim(config, null, pending.account);
     setPending(null);
-    setUpdates([]);
+    setUpdateState(null);
     void refreshName(pending.name);
     setInput(pending.name);
-    setClaimError("Pending state discarded. Name availability is being checked before continuing.");
+    claimMessage(
+      claimScope(pending),
+      "Pending state discarded. Name availability is being checked before continuing.",
+    );
   }
   async function lookUp(event: SyntheticEvent): Promise<void> {
     event.preventDefault();
@@ -503,7 +662,71 @@ export function App({
   }
   const owned = search?.owner !== null && search?.owner === wallet.account;
   const canClaim = search && (search.available || owned);
+  const searchPlan = search?.setup ? registrationPlan(search.setup, primary) : null;
+  const approvalPlan = claiming ? flow?.plan : searchPlan;
+  const showApprovals = claiming || (canClaim && !setupComplete(search.setup, primary));
   const deployed = isDeployed(config);
+  const selection = getSelection();
+  const recovery = pending ? { ...claimScope(pending), primary: pending.primary ?? false } : null;
+  const tracked =
+    flow && flow.node === selection.node
+      ? flow
+      : recovery && (selection.requestId === 0 || recovery.node === selection.node)
+        ? recovery
+        : null;
+  const updates =
+    tracked && updateState && sameClaimRequest(tracked, updateState.scope) ? updateState.items : [];
+  const progress =
+    deployed && (tracked || (search && canClaim))
+      ? {
+          name: tracked?.name ?? search?.name ?? "",
+          config,
+          primary: tracked?.primary ?? primary,
+          state: search && (!tracked || tracked.name === search.name) ? search.setup : null,
+          updates:
+            updates.length > 0
+              ? updates
+              : pending && tracked && sameClaimRequest(tracked, claimScope(pending))
+                ? [
+                    {
+                      ...pending.update,
+                      status:
+                        pending.update.status === "approval"
+                          ? ("unconfirmed" as const)
+                          : pending.update.status,
+                    },
+                  ]
+                : [],
+          running: claiming,
+          ...(claiming && flow?.plan ? { plan: flow.plan } : {}),
+        }
+      : null;
+
+  const approvalDetails = showApprovals && approvalPlan && (
+    <>
+      <dl>
+        <Row label="Registration price">Free</Row>
+        <Row label="Network fee">Each approval costs a small fee in Quanta.</Row>
+        <Row label="Wallet approvals">
+          {remainingApprovals(approvalPlan, claiming ? updates : [])} remaining
+        </Row>
+      </dl>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={primary}
+          disabled={claiming || pending !== null || checkingPending}
+          onChange={(event) => {
+            setPrimary(event.target.checked);
+            setFlow(null);
+            setUpdateState(null);
+          }}
+        />
+        <span>Use as my primary name</span>
+      </label>
+      <p className="muted text-sm">Your primary name appears when someone looks up your address.</p>
+    </>
+  );
 
   return (
     <>
@@ -552,12 +775,18 @@ export function App({
         </div>
         <div className="workspace">
           <div className="main-column">
-            <section id="register" className="panel" aria-labelledby="register-title">
+            <section
+              ref={claimCard}
+              id="register"
+              className="panel"
+              aria-labelledby="register-title"
+            >
               <div className="section-heading">
                 <p className="eyebrow">01 / REGISTER</p>
                 <h2 id="register-title">Find your .qrl name</h2>
                 <p>Use letters, numbers and hyphens.</p>
               </div>
+              {progress && <ClaimSummary {...progress} />}
               {!deployed && (
                 <Message>
                   QNS deployment is pending on this network. Search and registration will open when
@@ -598,7 +827,8 @@ export function App({
                     onChange={(event) => {
                       setInput(event.target.value);
                       void refreshName(null);
-                      setClaimed(null);
+                      setFlow(null);
+                      setUpdateState(null);
                     }}
                   />
                   <button disabled={!network.ready || searching || claiming || !input}>
@@ -607,6 +837,7 @@ export function App({
                 </div>
               </form>
               {searchError && <Message error>{searchError}</Message>}
+              {!search && approvalDetails}
               {search && (
                 <div className="search-result">
                   <dl>
@@ -619,92 +850,54 @@ export function App({
                         {search.owner}
                       </Row>
                     )}
+                    {search.setup?.resolverStatus === "unusable" && (
+                      <Row label="Records">Resolver not usable</Row>
+                    )}
                   </dl>
-                  {canClaim && (
-                    <>
-                      <dl>
-                        <Row label="Registration price">0 QRL</Row>
-                        <Row label="Network fee">Gas applies to each transaction.</Row>
-                        <Row label="Wallet approvals">
-                          {primary ? "Up to 5 transactions" : "Up to 4 transactions"}
-                        </Row>
-                      </dl>
-                      <label className="checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={primary}
-                          disabled={claiming}
-                          onChange={(event) => {
-                            setPrimary(event.target.checked);
+                  {approvalDetails}
+                  {wallet.account
+                    ? !setupComplete(search.setup, primary) && (
+                        <button
+                          className="w-full mt-5"
+                          disabled={
+                            !canClaim ||
+                            !search.setup ||
+                            !walletReady ||
+                            claiming ||
+                            pending !== null ||
+                            !network.ready
+                          }
+                          onClick={() => {
+                            void claim();
                           }}
-                        />
-                        <span>Use as my primary name</span>
-                      </label>
-                      <p className="muted text-sm">
-                        Your primary name appears when someone looks up your address.
-                      </p>
-                    </>
-                  )}
-                  {wallet.account ? (
-                    <button
-                      className="w-full mt-5"
-                      disabled={
-                        !canClaim || !walletReady || claiming || pending !== null || !network.ready
-                      }
-                      onClick={() => {
-                        void claim();
-                      }}
-                    >
-                      {claiming
-                        ? "Claim in progress..."
-                        : owned
-                          ? "Complete name setup"
-                          : "Claim name"}
-                    </button>
-                  ) : (
-                    canClaim && (
-                      <button
-                        className="w-full mt-5"
-                        onClick={() => {
-                          setPicker(true);
-                        }}
-                      >
-                        Connect wallet to claim
-                      </button>
-                    )
-                  )}
+                        >
+                          {claiming
+                            ? "Claim in progress..."
+                            : owned
+                              ? "Complete name setup"
+                              : "Claim name"}
+                        </button>
+                      )
+                    : canClaim && (
+                        <button
+                          className="w-full mt-5"
+                          onClick={() => {
+                            setPicker(true);
+                          }}
+                        >
+                          Connect wallet to claim
+                        </button>
+                      )}
                 </div>
               )}
-              {claimed && (
-                <Message>
-                  {claimed.name} now resolves to your address.
-                  {claimed.primary ? " Your primary name is set." : ""}
-                </Message>
-              )}
-              {claimError && <Message error>{claimError}</Message>}
-              {updates.length > 0 && (
-                <div className="transactions" aria-live="polite">
-                  <h3>Transactions</h3>
-                  <ol>
-                    {updates.map((update) => (
-                      <li key={update.step}>
-                        <strong>{stepLabels[update.step]}</strong>
-                        <span>{statusLabels[update.status]}</span>
-                        {update.hash && (
-                          <a
-                            className="font-mono break-all"
-                            href={`https://zondscan.com/tx/${update.hash}`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {update.hash}
-                          </a>
-                        )}
-                        {update.message && <p className="muted">{update.message}</p>}
-                      </li>
-                    ))}
-                  </ol>
-                </div>
+              {progress && <ClaimProgress {...progress} />}
+              {claimError && (
+                <>
+                  {claimError.scope.node !== selection.node && (
+                    <p className="muted text-sm">Claim update for {claimError.scope.name}</p>
+                  )}
+                  <Message error>{claimError.message}</Message>
+                </>
               )}
               {pending && !claiming && (
                 <div className="pending">
@@ -750,13 +943,20 @@ export function App({
                     className="secondary mt-4 w-full"
                     disabled={checkingPending || !/^0x[0-9a-fA-F]{64}$/.test(recoveryHash)}
                     onClick={() => {
-                      recordUpdate(
-                        pending.name,
-                        pending.account,
-                        { ...pending.update, hash: recoveryHash, status: "unconfirmed" },
-                        pending.primary,
-                        pending.attemptId,
-                      );
+                      const update: TransactionUpdate = {
+                        ...pending.update,
+                        hash: recoveryHash,
+                        status: "unconfirmed",
+                      };
+                      if (
+                        ["mismatched", "replaced", "incomplete", "verification-failed"].includes(
+                          pending.update.status,
+                        ) &&
+                        pending.update.hash?.toLowerCase() === recoveryHash.toLowerCase()
+                      )
+                        update.status = pending.update.status;
+                      else delete update.message;
+                      recordUpdate(claimScope(pending), update, pending.primary);
                     }}
                   >
                     Track transaction
@@ -817,34 +1017,64 @@ export function App({
                     <p className="muted mt-4">You do not own any .qrl names yet.</p>
                   )}
                   <ul className="owned-names">
-                    {names.map((name) => (
-                      <li key={name.node}>
-                        <dl>
-                          <Row label="Name">{name.name ?? "Spelling unavailable"}</Row>
-                          {!name.name && (
-                            <Row label="Name hash" mono>
-                              {name.node}
-                            </Row>
+                    {names.map((name) => {
+                      const addressReady = name.records?.address === wallet.account;
+                      const recordsReady =
+                        name.records?.resolverStatus === "usable" &&
+                        addressReady &&
+                        name.records.resolver === config.contracts.QRLPublicResolver &&
+                        name.records.spelling === name.name;
+                      return (
+                        <li key={name.node}>
+                          <dl>
+                            <Row label="Name">{name.name ?? "Spelling unavailable"}</Row>
+                            {!name.name && (
+                              <Row label="Name hash" mono>
+                                {name.node}
+                              </Row>
+                            )}
+                            <Row label="State">{ownedNameStatus(name, wallet.account, config)}</Row>
+                            {name.primary === false && (
+                              <Row label="Primary name">Not set as primary</Row>
+                            )}
+                          </dl>
+                          {name.records === null ? (
+                            <button
+                              className="text-button"
+                              disabled={namesLoading}
+                              onClick={() => {
+                                setRefresh((value) => value + 1);
+                                if (readErrorName === name.name) void refreshName();
+                              }}
+                            >
+                              Retry name records
+                            </button>
+                          ) : name.name ? (
+                            (!recordsReady || !name.primary) && (
+                              <button
+                                className="text-button"
+                                disabled={
+                                  claiming ||
+                                  checkingPending ||
+                                  pending !== null ||
+                                  !walletReady ||
+                                  readErrorName === name.name
+                                }
+                                onClick={() => {
+                                  void continueName(name.name, recordsReady);
+                                }}
+                              >
+                                {recordsReady ? "Make primary name" : "Finish name setup"}
+                              </button>
+                            )
+                          ) : (
+                            <p className="muted text-sm">
+                              Search its spelling above to check and complete setup.
+                            </p>
                           )}
-                        </dl>
-                        {name.name ? (
-                          <a
-                            href="#register"
-                            onClick={() => {
-                              setInput(name.name ?? "");
-                              setClaimed(null);
-                              void refreshName(name.name);
-                            }}
-                          >
-                            Set up this name
-                          </a>
-                        ) : (
-                          <p className="muted text-sm">
-                            Search its spelling above to add it to this browser.
-                          </p>
-                        )}
-                      </li>
-                    ))}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </>
               )}

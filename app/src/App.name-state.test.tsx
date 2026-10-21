@@ -83,7 +83,7 @@ describe("foreign owner refresh matrix", () => {
       });
     }
     await expectForeignOwner();
-    expect(screen.queryByText("alice.qrl now resolves to your address.")).toBeNull();
+    expect(screen.queryByText("alice.qrl is ready. It resolves to your address.")).toBeNull();
   });
 
   it.each(

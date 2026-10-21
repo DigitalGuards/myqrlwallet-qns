@@ -15,6 +15,8 @@ export { parseNetworkConfig, assertNetwork, isDeployed, requireContract } from "
 export type { NetworkConfig, ContractName } from "./config.js";
 export {
   registrationName,
+  registrationSteps,
+  registrationPlan,
   registrationTransaction,
   readRegistrationState,
   checkRegistrationTransaction,
@@ -25,12 +27,16 @@ export {
   registerName,
   waitForReceipt,
   PendingTransactionError,
+  RevertedTransactionError,
+  TransactionMismatchError,
 } from "./registration.js";
 export type {
+  NameRecords,
   RegistrationContext,
   RegistrationState,
   RegistrationOptions,
   RegistrationStep,
+  RegistrationPlan,
   TransactionStatus,
   TransactionUpdate,
 } from "./registration.js";

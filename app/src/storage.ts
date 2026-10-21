@@ -3,6 +3,7 @@ import {
   registrationName,
   type NetworkConfig,
   type TransactionUpdate,
+  type TransactionStatus,
 } from "@qns/sdk";
 import { isRecord } from "./rpc";
 
@@ -45,6 +46,21 @@ function pendingKey(config: NetworkConfig, account: string): string {
   return `${key(config, "pending")}:${config.genesisHash ?? config.rpcUrl}:${canonicalAddress(account)}`;
 }
 
+// Reload keeps settled outcomes terminal and resumes unfinished wallet requests as uncertain.
+const restoredStatuses = {
+  approval: "unconfirmed",
+  pending: "unconfirmed",
+  verifying: "verification-failed",
+  unconfirmed: "unconfirmed",
+  confirmed: "confirmed",
+  skipped: "skipped",
+  failed: "failed",
+  mismatched: "mismatched",
+  replaced: "replaced",
+  incomplete: "incomplete",
+  "verification-failed": "verification-failed",
+} satisfies Record<TransactionStatus, TransactionStatus>;
+
 export function readPendingClaim(
   config: NetworkConfig,
   account: string | null,
@@ -64,7 +80,7 @@ export function readPendingClaim(
     )
       return null;
     if (canonicalAddress(value.account) !== canonicalAddress(account)) return null;
-    const { step, hash, nonce, requestId } = value.update;
+    const { step, hash, nonce, requestId, status: savedStatus } = value.update;
     if (
       (step !== "register" &&
         step !== "resolver" &&
@@ -95,7 +111,10 @@ export function readPendingClaim(
         ...(typeof hash === "string" ? { hash } : {}),
         ...(typeof nonce === "string" ? { nonce } : {}),
         ...(typeof requestId === "string" || typeof requestId === "number" ? { requestId } : {}),
-        status: "unconfirmed",
+        status:
+          Object.entries(restoredStatuses).find(([status]) => status === savedStatus)?.[1] ??
+          "unconfirmed",
+        ...(typeof value.update.message === "string" ? { message: value.update.message } : {}),
       },
     };
   } catch {

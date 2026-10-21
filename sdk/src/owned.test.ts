@@ -1,11 +1,67 @@
 import { describe, expect, it } from "vitest";
-import { isRecord, quantity, stringArgument, bytes32Word, hashText } from "./abi.js";
+import { isRecord, quantity, stringArgument, bytes32Word, hashText, ZERO_ADDRESS } from "./abi.js";
 import { parseNetworkConfig } from "./config.js";
 import { listOwnedNames } from "./owned.js";
 import { registrationName } from "./registration.js";
+import { reverseNodeFor } from "./resolver.js";
 import { ACCOUNT, config, MockChain } from "./__tests__/mockProvider.js";
 
 const legacy = parseNetworkConfig({ ...config, deploymentBlock: undefined });
+
+describe("owned name records", () => {
+  it("reads external names and verified primary status at the ownership snapshot", async () => {
+    const chain = new MockChain();
+    const primary = registrationName("first");
+    const secondary = registrationName("second");
+    for (const entry of [primary, secondary]) {
+      chain.seed(entry.name, ACCOUNT);
+      chain.resolvers.set(entry.node, config.contracts.QRLPublicResolver ?? "");
+      chain.addresses.set(entry.node, ACCOUNT);
+      chain.spellings.set(entry.node, entry.name);
+    }
+    chain.primary = primary.name;
+    chain.resolvers.set(reverseNodeFor(ACCOUNT), config.contracts.QRLPublicResolver ?? "");
+    const names = await listOwnedNames(ACCOUNT, { config, provider: chain });
+    expect(names).toEqual(
+      [primary, secondary].map(({ name, node, labelHash }) => ({
+        name,
+        node,
+        labelHash,
+        primary: name === primary.name,
+        records: {
+          resolver: config.contracts.QRLPublicResolver,
+          resolverStatus: "usable",
+          address: ACCOUNT,
+          spelling: name,
+        },
+      })),
+    );
+    for (const request of chain.calls.filter((request) => request.method === "qrl_call")) {
+      expect(request.params?.[1]).toBe("0x20");
+    }
+    expect(chain.sent).toHaveLength(0);
+  });
+
+  it("keeps missing records explicit and accepts only hash-matching stored spellings", async () => {
+    const chain = new MockChain();
+    chain.seed("alice", ACCOUNT);
+    const parsed = registrationName("alice");
+    expect((await listOwnedNames(ACCOUNT, { config, provider: chain }))[0]).toMatchObject({
+      name: null,
+      primary: false,
+      records: { resolver: ZERO_ADDRESS, address: null, spelling: null },
+    });
+    chain.resolvers.set(parsed.node, config.contracts.QRLPublicResolver ?? "");
+    chain.spellings.set(parsed.node, "someone-else.qrl");
+    expect((await listOwnedNames(ACCOUNT, { config, provider: chain }))[0]).toMatchObject({
+      name: null,
+      primary: false,
+      records: { address: null, spelling: "someone-else.qrl" },
+    });
+    chain.spellings.set(parsed.node, parsed.name);
+    expect((await listOwnedNames(ACCOUNT, { config, provider: chain }))[0]?.name).toBe(parsed.name);
+  });
+});
 
 describe("deployment block validation", () => {
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, null, "4", true])(
@@ -120,7 +176,7 @@ describe("owned-name log ranges", () => {
           data: `0x${stringArgument(parsed.name)}`,
         },
       ];
-      expect(await listOwnedNames(ACCOUNT, { config: network, provider: chain })).toEqual([
+      expect(await listOwnedNames(ACCOUNT, { config: network, provider: chain })).toMatchObject([
         { name: parsed.name, node: parsed.node, labelHash: parsed.labelHash },
       ]);
       for (const address of [config.contracts.QNSRegistry, config.contracts.QRLPublicResolver]) {

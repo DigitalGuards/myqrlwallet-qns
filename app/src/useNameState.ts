@@ -4,17 +4,22 @@ import {
   isAvailable,
   isDeployed,
   nameOwner,
+  readRegistrationState,
   registrationName,
   type NetworkConfig,
+  type RegistrationState,
   type RpcProvider,
 } from "@qns/sdk";
 import { errorMessage } from "./rpc";
 import type { WalletController } from "./wallet";
 
-interface NameResult {
+export interface NameResult {
   name: string;
+  node: string;
+  requestId: number;
   available: boolean;
   owner: string | null;
+  setup: RegistrationState | null;
 }
 
 /** All displayed ownership comes from refreshName, including recovery and wallet changes. */
@@ -32,32 +37,49 @@ export function useNameState(
   active.current = context;
   const mounted = useRef(true);
   const request = useRef(0);
-  const selected = useRef<string | null>(null);
+  const selected = useRef<{ input: string | null; node: string | null; requestId: number }>({
+    input: null,
+    node: null,
+    requestId: 0,
+  });
+  const getSelection = useCallback(() => selected.current, []);
   const [state, setState] = useState<{
     context: typeof context;
     result: NameResult | null;
     error: string | null;
+    readErrorName: string | null;
     loading: boolean;
-  }>({ context, result: null, error: null, loading: false });
+  }>({ context, result: null, error: null, readErrorName: null, loading: false });
 
   // An omitted input refreshes the current selection. Old operations cannot select their old name.
   const refreshName = useCallback(
-    async (input = selected.current): Promise<NameResult | null> => {
+    async (input?: string | null): Promise<NameResult | null> => {
       const sameContext = () =>
         mounted.current &&
         active.current === context &&
         controller.getSnapshot().revision === revision;
       if (!sameContext()) return null;
-      selected.current = input;
+      if (input !== undefined) {
+        let node: string | null = null;
+        try {
+          if (input !== null) node = registrationName(input).node;
+        } catch {
+          // Invalid input has its own request and clears the preceding selection.
+        }
+        selected.current = { input, node, requestId: selected.current.requestId + 1 };
+      }
+      const selection = selected.current;
+      const selectedInput = selection.input;
       const generation = ++request.current;
-      const current = () => sameContext() && generation === request.current;
-      const loading = input !== null && isDeployed(config);
-      setState({ context, result: null, error: null, loading });
+      const current = () =>
+        sameContext() && selected.current === selection && generation === request.current;
+      const loading = selectedInput !== null && isDeployed(config);
+      setState({ context, result: null, error: null, readErrorName: null, loading });
       if (!loading) return null;
-      let reading = false;
+      let readingName: string | null = null;
       try {
-        const { name } = registrationName(input);
-        reading = true;
+        const { name, node } = registrationName(selectedInput);
+        readingName = name;
         await assertNetwork(provider, config);
         // Availability and owner must describe the same block.
         const block = await provider.request({ method: "qrl_blockNumber" });
@@ -66,25 +88,42 @@ export function useNameState(
         if (!current()) return null;
         const snapshot: RpcProvider = {
           request: (args) =>
-            provider.request(
-              args.method === "qrl_call" ? { ...args, params: [args.params?.[0], block] } : args,
-            ),
+            args.method === "qrl_blockNumber"
+              ? Promise.resolve(block)
+              : provider.request(
+                  args.method === "qrl_call"
+                    ? { ...args, params: [args.params?.[0], block] }
+                    : args,
+                ),
         };
         const [available, owner] = await Promise.all([
           isAvailable(name, { config, provider: snapshot }),
           nameOwner(name, { config, provider: snapshot }),
         ]);
+        const account = controller.getSnapshot().account;
+        const setup =
+          account !== null && (owner === null || owner === account)
+            ? await readRegistrationState(name, account, { config, provider: snapshot })
+            : null;
         await assertNetwork(provider, config);
         if (!current()) return null;
-        const result = { name, available: available && owner === null, owner };
-        setState({ context, result, error: null, loading: false });
+        const result = {
+          name,
+          node,
+          requestId: generation,
+          available: available && owner === null,
+          owner,
+          setup,
+        };
+        setState({ context, result, error: null, readErrorName: null, loading: false });
         return result;
       } catch (error) {
         if (current())
           setState({
             context,
             result: null,
-            error: `${reading ? "Could not refresh name availability: " : ""}${errorMessage(error)}`,
+            error: `${readingName !== null ? "Could not refresh name availability: " : ""}${errorMessage(error)}`,
+            readErrorName: readingName,
             loading: false,
           });
         return null;
@@ -106,7 +145,9 @@ export function useNameState(
   return {
     search: visible ? state.result : null,
     searchError: visible ? state.error : null,
+    readErrorName: visible ? state.readErrorName : null,
     searching: visible && state.loading,
     refreshName,
+    getSelection,
   };
 }
