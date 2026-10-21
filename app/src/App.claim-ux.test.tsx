@@ -16,16 +16,17 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function mount(chain = new MockChain()) {
+async function mount(chain = new MockChain(), connected = true) {
   const controller = new WalletController(config);
   render(<App config={config} provider={chain} controller={controller} />);
-  await act(() =>
-    controller.connectExtension({
-      id: "com.qrlwallet.extension",
-      name: "MyQRLWallet Extension",
-      provider: { request: (args) => chain.request(args), listen: () => () => {} },
-    }),
-  );
+  if (connected)
+    await act(() =>
+      controller.connectExtension({
+        id: "com.qrlwallet.extension",
+        name: "MyQRLWallet Extension",
+        provider: { request: (args) => chain.request(args), listen: () => () => {} },
+      }),
+    );
   await waitFor(() => {
     expect(screen.getByRole("button", { name: "Search" }).hasAttribute("disabled")).toBe(true);
   });
@@ -73,6 +74,117 @@ class GatedChain extends MockChain {
 }
 
 describe("claim explanations", () => {
+  it.each([false, true])("explains an unsearched name (connected=%s)", async (connected) => {
+    const { chain } = await mount(new MockChain(), connected);
+    expect(screen.getByText("Search for a name to see the steps.")).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "alice" } });
+    expect(screen.getByText("Search for a name to see the steps.")).toBeDefined();
+    expect(screen.queryByRole("list", { name: "Claim steps" })).toBeNull();
+    expect(screen.queryByText("Registration price")).toBeNull();
+    expect(chain.sent).toHaveLength(0);
+  });
+
+  it("shows the free price and connection summary beside the disconnected claim steps", async () => {
+    const { chain, controller } = await mount(new MockChain(), false);
+    await search("ALICE");
+    const card = within(screen.getByRole("region", { name: "Find your .qrl name" }));
+    const disconnectedSummary = "Connect your wallet to see the approvals alice.qrl needs.";
+    expect(card.getByRole("status").textContent).toBe(disconnectedSummary);
+    expect(card.getByText("Step 1 of 4")).toBeDefined();
+    expect(card.getByRole("button", { name: "Connect wallet to claim" })).toBeDefined();
+    expect(card.getByText("Registration price").nextElementSibling?.textContent).toBe("Free");
+    expect(card.queryByText("Wallet approvals")).toBeNull();
+
+    await act(() =>
+      controller.connectExtension({
+        id: "com.qrlwallet.extension",
+        name: "MyQRLWallet Extension",
+        provider: { request: (args) => chain.request(args), listen: () => () => {} },
+      }),
+    );
+    await card.findByText("Set up alice.qrl: 4 wallet approvals remaining.");
+    expect(card.getByText("Registration price").nextElementSibling?.textContent).toBe("Free");
+    await act(() => controller.disconnect());
+    await card.findByText(disconnectedSummary);
+    expect(card.getByText("Registration price").nextElementSibling?.textContent).toBe("Free");
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "bob" } });
+    expect(card.getByRole("status").textContent).toBe("Search for a name to see the steps.");
+    expect(card.queryByText("Registration price")).toBeNull();
+    expect(chain.sent).toHaveLength(0);
+  });
+
+  it.each([false, true])("shows a pending name read (connected=%s)", async (connected) => {
+    const { chain } = await mount(new MockChain(), connected);
+    let finish: (() => void) | undefined;
+    const request = chain.request.bind(chain);
+    vi.spyOn(chain, "request").mockImplementation((args) => {
+      if (args.method === "qrl_blockNumber")
+        return new Promise((resolve) => {
+          finish = () => {
+            resolve(request(args));
+          };
+        });
+      return request(args);
+    });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "ALICE" } });
+    const button = screen.getByRole("button", { name: "Search" });
+    await waitFor(() => {
+      expect(button.hasAttribute("disabled")).toBe(false);
+    });
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(finish).toBeDefined();
+    });
+    const card = within(screen.getByRole("region", { name: "Find your .qrl name" }));
+    expect(card.getByRole("status").textContent).toBe("Reading alice.qrl...");
+    expect(card.getByRole("button", { name: "Searching..." }).hasAttribute("disabled")).toBe(true);
+    expect(card.queryByText("Registration price")).toBeNull();
+    await act(async () => {
+      finish?.();
+      await Promise.resolve();
+    });
+    await card.findByText(
+      connected
+        ? "Set up alice.qrl: 4 wallet approvals remaining."
+        : "Connect your wallet to see the approvals alice.qrl needs.",
+    );
+    expect(chain.sent).toHaveLength(0);
+  });
+
+  it.each([false, true])("points to the retryable read error (connected=%s)", async (connected) => {
+    const { chain } = await mount(new MockChain(), connected);
+    await search();
+    const request = chain.request.bind(chain);
+    const failedRead = vi
+      .spyOn(chain, "request")
+      .mockImplementation((args) =>
+        args.method === "qrl_blockNumber"
+          ? Promise.reject(new Error("Name lookup failed"))
+          : request(args),
+      );
+    const button = screen.getByRole("button", { name: "Search" });
+    await waitFor(() => {
+      expect(button.hasAttribute("disabled")).toBe(false);
+    });
+    fireEvent.click(button);
+    const card = within(screen.getByRole("region", { name: "Find your .qrl name" }));
+    await card.findByText("Could not refresh name availability: Name lookup failed");
+    expect(card.getByRole("status").textContent).toBe("Check the error below and search again.");
+    expect(card.getByRole("alert").textContent).toContain("Name lookup failed");
+    expect(card.queryByText("Registration price")).toBeNull();
+    expect(button.hasAttribute("disabled")).toBe(false);
+    failedRead.mockRestore();
+    fireEvent.click(button);
+    await card.findByText(
+      connected
+        ? "Set up alice.qrl: 4 wallet approvals remaining."
+        : "Connect your wallet to see the approvals alice.qrl needs.",
+    );
+    expect(card.queryByRole("alert")).toBeNull();
+    expect(chain.sent).toHaveLength(0);
+  });
+
   it.each([false, true])(
     "highlights the restored pending step (hash returned=%s)",
     async (hasHash) => {
