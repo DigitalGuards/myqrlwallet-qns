@@ -10,6 +10,32 @@ export {
   sha3HexAddress,
 } from "./resolver.js";
 export type { RpcProvider, QnsConfig } from "./resolver.js";
+export { canonicalAddress } from "./abi.js";
+export { parseNetworkConfig, assertNetwork, isDeployed, requireContract } from "./config.js";
+export type { NetworkConfig, ContractName } from "./config.js";
+export {
+  registrationName,
+  registrationTransaction,
+  readRegistrationState,
+  checkRegistrationTransaction,
+  isNonceConsumed,
+  isAvailable,
+  nameOwner,
+  assertDeployment,
+  registerName,
+  waitForReceipt,
+  PendingTransactionError,
+} from "./registration.js";
+export type {
+  RegistrationContext,
+  RegistrationState,
+  RegistrationOptions,
+  RegistrationStep,
+  TransactionStatus,
+  TransactionUpdate,
+} from "./registration.js";
+export { listOwnedNames } from "./owned.js";
+export type { OwnedName } from "./owned.js";
 export {
   MLDSA87_DIGEST_BYTES,
   MLDSA87_MAX_CONTEXT_BYTES,

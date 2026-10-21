@@ -1,0 +1,53 @@
+{
+  "name": "qns-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "predev": "npm --prefix ../sdk run build",
+    "dev": "vite --host 127.0.0.1",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --maxWorkers=2",
+    "prebuild": "npm --prefix ../sdk run build",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@fontsource-variable/instrument-sans": "^5.2.8",
+    "@fontsource-variable/sora": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@qns/sdk": "file:../sdk",
+    "@qrlwallet/connect": "5.0.2",
+    "@qrlwallet/connect-ui": "0.3.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.1.18",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.9",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.71.1",
+    "vite": "^7.3.2",
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "postcss": "8.5.25",
+    "socket.io-parser": "4.2.7"
+  }
+}

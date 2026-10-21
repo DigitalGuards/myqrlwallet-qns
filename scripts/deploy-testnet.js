@@ -20,11 +20,9 @@ const {
 const { loadDeployerFromEnvironment } = require("./lib/loadDeployer");
 const { assertQrl2PQPrecompileTarget } = require("./lib/qrl2Target");
 const { assertNetworkIdentity } = require("./lib/networkIdentity");
+const { loadDeploymentConfig } = require("./lib/deploymentConfig");
 
 const repoRoot = path.join(__dirname, "..");
-const configPath = process.env.QNS_CONFIG
-    ? path.resolve(repoRoot, process.env.QNS_CONFIG)
-    : path.join(repoRoot, "config", "local-qip55.json");
 const hyperionArtifactsDir = path.join(repoRoot, "build", "hyperion");
 let verifiedArtifactManifest;
 let verifyNetwork;
@@ -55,7 +53,7 @@ function loadHyperionArtifact(contractName) {
     return { abi, bytecode };
 }
 
-async function deployContract(web3, account, contractName, constructorArgs = []) {
+async function deployContract(web3, account, contractName, constructorArgs = [], onReceipt) {
     const artifact = loadHyperionArtifact(contractName);
     console.log(`\nDeploying ${contractName}${constructorArgs.length ? `(${constructorArgs.join(", ")})` : ""}...`);
 
@@ -68,12 +66,14 @@ async function deployContract(web3, account, contractName, constructorArgs = [])
     const gas = await deployTx.estimateGas({ from: account.address });
     console.log(`  gas estimate: ${gas}`);
 
-    const deployed = await deployTx.send({
+    const submission = deployTx.send({
         chainId: await verifyNetwork(),
         from: account.address,
         gas: Math.floor(Number(gas) * 1.2),
     });
 
+    if (onReceipt) submission.once("receipt", onReceipt);
+    const deployed = await submission;
     console.log(`  address: ${deployed.options.address}`);
     return deployed;
 }
@@ -116,7 +116,12 @@ function subnode(parentNode, label, web3) {
 }
 
 async function main() {
-    const config = loadJson(configPath);
+    const selector = process.env.QNS_CONFIG;
+    if (typeof selector !== "string" || !selector.trim()) {
+        throw new Error("Set QNS_CONFIG to an existing target network configuration");
+    }
+    const configPath = path.resolve(repoRoot, selector);
+    const config = await loadDeploymentConfig(configPath);
     validateDeploymentTarget(config);
     verifiedArtifactManifest = verifyArtifactManifest({
         hyperionRoot: path.join(repoRoot, "contracts", "hyperion"),
@@ -153,6 +158,7 @@ async function main() {
     console.log(`Deployer: ${account.address}`);
     const balance = await web3.qrl.getBalance(account.address);
     console.log(`Balance: ${web3.utils.fromPlanck(balance, "quanta")} QRL`);
+    if (BigInt(balance) <= 0n) throw new Error("Fund the deployer account before deployment");
 
     const tldLabel = labelhash(config.tld, web3);
     const tldNode = namehash(config.tld, web3);
@@ -162,7 +168,13 @@ async function main() {
     // ------------------------------------------------------------
     // 1. QNSRegistry: deployer initially owns the root node.
     // ------------------------------------------------------------
-    const registry = await deployContract(web3, account, "QNSRegistry");
+    let deploymentBlock;
+    const registry = await deployContract(web3, account, "QNSRegistry", [], (receipt) => {
+        deploymentBlock = Number(receipt.blockNumber);
+    });
+    if (!Number.isSafeInteger(deploymentBlock) || deploymentBlock <= 0) {
+        throw new Error("Registry receipt must contain a positive deployment block");
+    }
 
     // ------------------------------------------------------------
     // 2. Root takes the registry, then we hand root-node ownership to it.
@@ -276,6 +288,7 @@ async function main() {
         QRLSignatureVerifier: signatureVerifier.options.address,
     };
     config.deployedAt = new Date().toISOString();
+    config.deploymentBlock = deploymentBlock;
     config.deployer = account.address;
     config.buildTarget = "hyperion";
     config.artifactManifestSha256 = sha256File(
@@ -293,8 +306,12 @@ async function main() {
     }
 }
 
-main().catch((err) => {
-    console.error("\nDeployment failed:", err.message);
-    if (err.data) console.error("Data:", err.data);
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch((err) => {
+        console.error("\nDeployment failed:", err.message);
+        if (err.data) console.error("Data:", err.data);
+        process.exit(1);
+    });
+}
+
+module.exports = { main };

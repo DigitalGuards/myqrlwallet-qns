@@ -20,8 +20,8 @@ describe("Connect v5 QIP-55 composition", () => {
       announceProvider: false,
     });
     const rpcProvider: RpcProvider = provider;
-    const manager = (provider as unknown as { connectionManager: ConnectionManager })
-      .connectionManager;
+    const manager: unknown = Reflect.get(provider, "connectionManager");
+    if (!(manager instanceof ConnectionManager)) throw new Error("Missing connection manager");
     vi.spyOn(manager, "getStatus").mockReturnValue(ConnectionStatus.CONNECTED);
     const requests: JsonRpcRequest[] = [];
     const send = vi.spyOn(manager, "sendJsonRpc").mockImplementation((request) => {
@@ -42,12 +42,19 @@ describe("Connect v5 QIP-55 composition", () => {
       );
       expect(send).toHaveBeenCalledTimes(2);
       expect(requests.map((request) => request.method)).toEqual(["qrl_call", "qrl_call"]);
-      expect(requests.map((request) => (request.params?.[0] as { to: string }).to)).toEqual([
-        registry,
-        resolver,
-      ]);
+      expect(
+        requests.map((request) => {
+          const transaction: unknown = request.params?.[0];
+          if (typeof transaction !== "object" || transaction === null || !("to" in transaction))
+            throw new Error("Missing transaction destination");
+          return transaction.to;
+        }),
+      ).toEqual([registry, resolver]);
       for (const request of requests) {
-        expect((request.params?.[0] as { data: string }).data).toMatch(/^0x[0-9a-f]{136}$/);
+        const transaction: unknown = request.params?.[0];
+        if (typeof transaction !== "object" || transaction === null || !("data" in transaction))
+          throw new Error("Missing transaction data");
+        expect(transaction.data).toMatch(/^0x[0-9a-f]{136}$/);
       }
     } finally {
       vi.restoreAllMocks();

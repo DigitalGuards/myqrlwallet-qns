@@ -7,7 +7,9 @@ const { verifyArtifactManifest } = require("./lib/hyperionArtifacts");
 
 const repoRoot = path.join(__dirname, "..");
 const workspaceRoot = path.join(repoRoot, "..");
-const hyperionRoot = path.join(workspaceRoot, "hyperion");
+const hyperionRoot = process.env.HYPERION_SOURCE_DIR
+    ? path.resolve(process.env.HYPERION_SOURCE_DIR)
+    : path.join(workspaceRoot, "hyperion");
 const qrvmoneRoot = path.join(workspaceRoot, "qrvmone");
 const canonicalRoot = path.join(repoRoot, "contracts", "hyperion");
 const semanticSource = path.join(

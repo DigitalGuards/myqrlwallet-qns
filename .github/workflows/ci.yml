@@ -53,7 +53,7 @@ jobs:
           cache-dependency-path: sdk/package-lock.json
 
       - name: Install
-        run: npm install
+        run: nice -n 10 npm ci
 
       - name: Typecheck
         run: npm run typecheck
@@ -64,3 +64,38 @@ jobs:
       - name: Test
         run: npm test
         if: ${{ hashFiles('sdk/src/**/*.test.ts') != '' }}
+
+  app:
+    name: Registration app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            sdk/package-lock.json
+            app/package-lock.json
+
+      - name: Install and build SDK
+        run: nice -n 10 npm --prefix sdk ci && nice -n 10 npm --prefix sdk run build
+
+      - name: Install app
+        run: nice -n 10 npm --prefix app ci
+
+      - name: Format
+        run: nice -n 10 npm --prefix app run format:check
+
+      - name: Lint
+        run: nice -n 10 npm --prefix app run lint
+
+      - name: Typecheck
+        run: nice -n 10 npm --prefix app run typecheck
+
+      - name: Test
+        run: nice -n 10 npm --prefix app test
+
+      - name: Build
+        run: nice -n 10 npm --prefix app run build
