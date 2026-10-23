@@ -53,7 +53,9 @@ it.each(readFailures)("propagates a failed %s read and permits a clean retry", a
       account: ACCOUNT,
       transport: "extension",
       primary: true,
-      onUpdate: () => {},
+      onUpdate: () => {
+        // This test checks the propagated read failure and absence of transactions.
+      },
     }),
   ).rejects.toThrow(chain.message);
   expect(chain.sent).toHaveLength(0);

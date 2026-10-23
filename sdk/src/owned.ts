@@ -51,9 +51,10 @@ function smallerLogRange(error: unknown, span: bigint): bigint | null {
     !/(?:limit|max|exceed|too (?:large|wide)|at most|up to)/i.test(message)
   )
     return null;
-  const match = message.match(
-    /(?:max(?:imum)?(?:[\s_-]+block)?(?:[\s_-]+range)?(?:[\s_-]+(?:limit|size))?(?:\s+(?:is|of))?|limited to|limit(?:\s+(?:is|of))?|up to|at most)\s*[:=]?\s*([\d,]+)\b/i,
-  );
+  const match =
+    /(?:max(?:imum)?(?:[\s_-]+block)?(?:[\s_-]+range)?(?:[\s_-]+(?:limit|size))?(?:\s+(?:is|of))?|limited to|limit(?:\s+(?:is|of))?|up to|at most)\s*[:=]?\s*([\d,]+)\b/i.exec(
+      message,
+    );
   const limit = match?.[1] ? BigInt(match[1].replaceAll(",", "")) : 0n;
   return limit > 0n && limit < span ? limit : span / 2n;
 }

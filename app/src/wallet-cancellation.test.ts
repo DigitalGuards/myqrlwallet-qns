@@ -5,7 +5,7 @@ import { TestWallet } from "./__tests__/mockWallet";
 import { extensionAnnouncement, WalletController } from "./wallet";
 
 const storageKey = `qns:wallet:${config.chainId}:${config.contracts.QNSRegistry ?? "pending"}`;
-const stops: Array<() => void> = [];
+const stops: (() => void)[] = [];
 beforeEach(() => {
   localStorage.clear();
 });

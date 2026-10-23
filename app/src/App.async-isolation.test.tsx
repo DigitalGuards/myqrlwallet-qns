@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { registrationName, registrationTransaction } from "@qns/sdk";
-import { ACCOUNT, config, MockChain } from "../../sdk/src/__tests__/mockProvider";
+import type { MockChain } from "../../sdk/src/__tests__/mockProvider";
+import { ACCOUNT, config } from "../../sdk/src/__tests__/mockProvider";
 import { isRecord, selector } from "../../sdk/src/abi";
 import { App } from "./App";
 import { WalletController } from "./wallet";
@@ -140,7 +141,7 @@ it("drops a delayed name snapshot after a newer search request", async () => {
   const alice = registrationName("alice");
   class DelayedSnapshot extends TestWallet {
     hold = false;
-    resumes: Array<() => void> = [];
+    resumes: (() => void)[] = [];
     override request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
       const call = args.params?.[0];
       if (

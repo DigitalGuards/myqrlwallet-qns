@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACCOUNT, config, MockChain, OTHER } from "../../sdk/src/__tests__/mockProvider";
+import type { MockChain } from "../../sdk/src/__tests__/mockProvider";
+import { ACCOUNT, config, OTHER } from "../../sdk/src/__tests__/mockProvider";
 import { TestWallet } from "./__tests__/mockWallet";
 import { extensionAnnouncement, WalletController } from "./wallet";
 
@@ -19,7 +20,14 @@ describe("wallet discovery and sessions", () => {
     for (const value of [
       null,
       {},
-      { info: { rdns: "io.metamask", uuid: "id", name: "Other" }, provider: { request() {} } },
+      {
+        info: { rdns: "io.metamask", uuid: "id", name: "Other" },
+        provider: {
+          request() {
+            // The unsupported wallet announcement is rejected before requests can run.
+          },
+        },
+      },
       { info: { rdns: "com.qrlwallet.extension", uuid: "id", name: "Wallet" }, provider: {} },
     ])
       expect(extensionAnnouncement(value)).toBeNull();

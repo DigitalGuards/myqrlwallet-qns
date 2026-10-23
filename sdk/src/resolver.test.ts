@@ -23,7 +23,7 @@ function encodedString(value: string): string {
 
 describe("QNS resolver provider compatibility", () => {
   it("uses qrl_call for resolver reads", async () => {
-    const requests: Array<{ method: string; params?: unknown[] }> = [];
+    const requests: { method: string; params?: unknown[] }[] = [];
     const provider: RpcProvider = {
       request(args) {
         requests.push(args);
@@ -123,7 +123,7 @@ describe("QNS resolver provider compatibility", () => {
   });
 
   it("resolves a native 64-byte address from 64-byte ABI words", async () => {
-    const requests: Array<{ method: string; params?: unknown[] }> = [];
+    const requests: { method: string; params?: unknown[] }[] = [];
     const provider: RpcProvider = {
       request(args) {
         requests.push(args);

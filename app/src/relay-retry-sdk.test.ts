@@ -39,7 +39,9 @@ beforeEach(() => {
       ) => await callback({ name, mode: "exclusive" }),
     },
   });
-  vi.spyOn(SocketClient.prototype, "connect").mockImplementation(() => {});
+  vi.spyOn(SocketClient.prototype, "connect").mockImplementation(() => {
+    // Keep the socket offline; channel operations and connection status are mocked below.
+  });
   vi.spyOn(SocketClient.prototype, "joinChannel").mockResolvedValue({
     bufferedMessages: [],
     channelPublicKey: null,

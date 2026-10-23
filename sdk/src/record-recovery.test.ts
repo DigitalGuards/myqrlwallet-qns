@@ -75,7 +75,9 @@ describe("unusable name records", () => {
         account: ACCOUNT,
         transport: "extension",
         primary: false,
-        onUpdate: () => {},
+        onUpdate: () => {
+          // Repair is checked through submitted transactions and resulting records.
+        },
       });
       expect(chain.sent.map((tx) => tx.data)).toEqual(
         (["resolver", "address", "name"] as const).map(

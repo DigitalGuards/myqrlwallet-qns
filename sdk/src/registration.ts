@@ -277,7 +277,7 @@ export interface RegistrationState extends NameRecords {
   required: Record<RegistrationStep, boolean>;
 }
 
-export type RegistrationPlan = ReadonlyArray<{ step: RegistrationStep; required: boolean }>;
+export type RegistrationPlan = readonly { step: RegistrationStep; required: boolean }[];
 
 /** The ordered plan is shared by the approval count, progress display and executor. */
 export function registrationPlan(state: RegistrationState, primary: boolean): RegistrationPlan {

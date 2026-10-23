@@ -148,7 +148,7 @@ export class WalletController {
   } | null = null;
   private revocations = new WeakMap<WalletProvider, Set<Promise<void>>>();
   private extensionChainId: string | null = null;
-  private relaySubscriptions: Array<() => void> = [];
+  private relaySubscriptions: (() => void)[] = [];
   private generation = 0;
   private expectedLateResponse: string | number | undefined;
   private authorizing: Promise<void> | null = null;
@@ -409,8 +409,12 @@ export class WalletController {
       this.revocations.set(provider, pending);
     }
     const settled = request.then(
-      () => {},
-      () => {},
+      () => {
+        // The barrier only needs completion; discard the revocation response.
+      },
+      () => {
+        // Release the barrier on failure too; the session receives the original rejection.
+      },
     );
     pending.add(settled);
     void settled.then(() => {

@@ -94,7 +94,12 @@ async function mount(chain: MockChain): Promise<void> {
     controller.connectExtension({
       id: "com.qrlwallet.extension",
       name: "MyQRLWallet Extension",
-      provider: { request: (args) => chain.request(args), listen: () => () => {} },
+      provider: {
+        request: (args) => chain.request(args),
+        listen: () => () => {
+          // This request-only provider installs no event listeners to remove.
+        },
+      },
     }),
   );
 }

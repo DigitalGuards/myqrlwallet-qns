@@ -82,7 +82,7 @@ describe("deployment block validation", () => {
 });
 
 class PagedChain extends MockChain {
-  pages: Array<{ address: unknown; from: bigint; to: bigint }> = [];
+  pages: { address: unknown; from: bigint; to: bigint }[] = [];
   attempts = 0;
   head = 4103n;
   limit = 2000n;
