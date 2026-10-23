@@ -10,7 +10,16 @@ Each package has one `eslint-ratchet.json`, consumed by `npm run lint` through t
 
 `npm run lint:ratchet` defaults to `origin/main`. Pass `-- --base-ref <ref>` to select a base. Pair additions and count increases fail. Stale entries or counts also fail the check. After fixing debt, `npm run lint:ratchet:update` can only lower counts and remove resolved pairs; it refuses new debt. Historical ledgers are parsed as JSON without executing historical code.
 
-The initial migration allows a missing base ledger only at the pinned source revision above. The checker exports that revision's complete package with `git archive` into a temporary directory, copies the checked revision's TypeScript configurations, and links its installed dependencies. App exports also include the base SDK sources because app tests import SDK helpers by relative path. It lints the archived source, tests, and scripts with the checked revision's ESLint configuration, rebasing `tsconfigRootDir` to the export. Both scans use `TSESTREE_SINGLE_RUN=false`, bypass bulk suppressions, and enforce the directive guard. Every proposed manifest pair must exist in the base findings at an equal or higher count. Temporary exports are removed on success and failure, and the checker reports the bootstrap scan duration. Subsequent bases must contain the ledger, including an empty `{}` after completion, and retain the existing manifest comparison.
+The initial migration allows a missing base ledger only at the pinned source revision above. Before linting, the checker compares base Git blobs with working file bytes across the setup PR, including the app and its local SDK dependency. Source additions, edits, deletions, renames and symlinks fail with `Bootstrap setup PR must not change sources`. The comparison covers tracked and untracked files; an additional walk covers Git-ignored JavaScript and TypeScript lint inputs in the selected package and, for the app, the SDK. Installed `node_modules` and generated package-root `dist` directories are excluded from that walk. Source files under nested directories named `dist` remain protected.
+
+Bootstrap permits differences only in these setup files:
+
+- `app/` and `sdk/`: `eslint.config.js`, `eslint-ratchet.json`, `tsconfig.json`, `tsconfig.eslint.json`, and `README.md`.
+- Root, app and SDK `package.json`: only the `scripts` member may change. All other parsed metadata must match the base; lockfiles must remain byte-identical.
+- `scripts/eslint-policy.mjs`, `scripts/lint-ratchet.mjs`, `test/scripts/lint-ratchet.test.js`, and `test/lint-ratchet/integration.test.js`.
+- `.github/workflows/ci.yml`, root `README.md`, and Markdown files below `docs/`.
+
+After source equality passes, one scan of the current package must match its manifest exactly: every file/rule pair and count, with no extra or missing pair and no raised or lowered count. This also applies to the update command, before any manifest write. Equal sources make these the base source findings under the new configuration. There is no archive export or second lint scan. Bases with an existing ledger retain the prior rules: allowances can only shrink, current findings must fit the working ledger, and update removes stale allowances. Subsequent bases must contain the ledger, including an empty `{}` after completion.
 
 The existing `app` and `sdk` CI jobs retain their names, fetch full history, and explicitly run lint, the ratchet, and typecheck before tests. Pull requests pass `github.event.pull_request.base.sha` to the checker; main pushes use `github.event.before`. Each package job also runs `test/lint-ratchet/integration.test.js` with `LINT_RATCHET_TEST_PACKAGE` set to its package name. The existing format, build, and test gates remain in place.
 
@@ -78,7 +87,7 @@ The proposed cleanup slices are independent. Each slice should rerun the package
 
 This is a counted ratchet: CI rejects new file/rule pairs and increases within an existing pair. A replacement finding in the same pair with an equal or lower count requires code review. An empty ledger gives full enforcement without allowances.
 
-Bootstrap validation used `CI=true`, Node `v20.20.2` for the SDK and ratchet unit tests, Node `v22.22.3` for the app, and npm `10.9.8`. Package gates ran sequentially in fresh processes using the installed dependencies. The explicit `--base-ref origin/main` resolved to the pinned source revision above. Every gate below exited 0.
+Source-equality validation used `CI=true`, Node `v20.20.2` for the SDK, Node `v22.22.3` for the app, and npm `10.9.8`. Package gates ran sequentially in fresh processes using the installed dependencies. The explicit `--base-ref origin/main` resolved to the pinned source revision above. Every gate below exited 0.
 
 | Command                                          | app exit code | sdk exit code |
 | ------------------------------------------------ | ------------: | ------------: |
@@ -88,12 +97,17 @@ Bootstrap validation used `CI=true`, Node `v20.20.2` for the SDK and ratchet uni
 | `npm run typecheck`                              |             0 |             0 |
 | `npm run test`                                   |             0 |             0 |
 | `npm run build`                                  |             0 |             0 |
+| Ratchet unit tests                               |             0 |             0 |
 | Ratchet integration tests                        |             0 |             0 |
 
-The standalone ratchet took 18.85 seconds for the app and 7.49 seconds for the SDK, including bootstrap export, lint, and cleanup times of 9.15 and 4.31 seconds respectively. These are local CI-like timings. The manifests remain byte-for-byte unchanged at 41 app findings and 16 SDK findings.
+The manifests remain byte-for-byte unchanged at 41 app findings and 16 SDK findings.
 
-App tests: 29 files and 19,256 tests passed. SDK tests: 14 files and 271 tests passed. `node --test test/scripts/lint-ratchet.test.js` passed all 9 tests with exit code 0 in 0.13 seconds and runs in the existing CI scripts job.
+App tests: 29 files and 19,256 tests passed. SDK tests: 14 files and 271 tests passed. `node --test test/scripts/lint-ratchet.test.js` passed all 10 tests under both Node versions, covering manifest validation, pair counts, exact bootstrap equality, non-growth, diagnostics and canonical serialization. It runs in the existing CI scripts job.
 
-`node --test test/lint-ratchet/integration.test.js` runs both installed packages by default; CI selects each package with `LINT_RATCHET_TEST_PACKAGE`. All 10 scenarios per package passed: unchanged manifests against bootstrap and existing-ledger bases, new `any` with and without an allowance, regeneration refusal, count growth from 1 to 2, typed unsafe assignment with an allowance, alternate suppression files, disable comments, inline overrides, mixed-case TypeScript directives, and repeated typed scans across source, tests, and scripts. The typed assignment probe also prevents missing sibling SDK imports from inflating the app's bootstrap allowances. The suite verifies temporary-export cleanup and uses current configuration even when the historical configuration would throw if executed. App integration tests exited 0 in 174.99 seconds; SDK integration tests exited 0 in 79.94 seconds.
+`node --test test/lint-ratchet/integration.test.js` runs both installed packages by default; CI selects each package with `LINT_RATCHET_TEST_PACKAGE`. The fixtures freeze source and manifests at the first ledger revision and overlay current lint tooling, so later debt fixes can still exercise bootstrap. All mutations stay in temporary fixtures with read-only Git history and installed dependencies. The app resolves `@qns/sdk` to its fixture's own rebuilt SDK.
 
-The bootstrap fix changes the shared checker, CI integration-test wiring, this census, and the new integration suite. Application and SDK source, existing tests, dependency metadata, and lockfiles are unchanged. Changes remain uncommitted.
+Each package exercises unchanged sources with an exact manifest; the round 2 SDK export rename plus an app unsafe-call allowance; a dependency-only source change; new `any` and typed unsafe assignment with allowances; raised and lowered counts, extra and missing pairs in both check and update modes; allowed setup changes; rejected dependency metadata and lockfile changes; deleted, renamed, hidden, ignored, nested and symlinked source files; and existing-ledger growth rejection, debt fixes and regeneration. The suite retains alternate suppression, directive, inline override and repeated typed scan coverage. The rename case first rejects the exact review patch, then completes the app namespace-import rename and rebuilds the fixture SDK, confirming that ordinary lint passes while bootstrap still rejects the changed sources.
+
+Both final integration runs passed all 20 scenarios (21 node:test results including the enclosing test), with exit code 0. Measured command durations were 199.83 seconds for the app and 165.06 seconds for the SDK. Earlier fixture failures were corrected before these full reruns. Tooling formatting and `git diff --check` also exited 0.
+
+The source-equality fix changes the shared checker, its unit and integration tests, and this census. Existing CI jobs already run both integration selections and the unit suite. Application and SDK source, package metadata, and lockfiles are unchanged. Changes remain uncommitted.

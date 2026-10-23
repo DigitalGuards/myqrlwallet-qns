@@ -1,19 +1,11 @@
 #!/usr/bin/env node
 // One counted ledger per package. All lint rules stay enabled.
 import { execFileSync } from "node:child_process";
-import {
-  copyFile,
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+import { isDeepStrictEqual, parseArgs } from "node:util";
 import { suppressionGuard } from "./eslint-policy.mjs";
 
 // Keep type information on repeated parses under CI, including guard scans.
@@ -81,6 +73,122 @@ export function assertNoGrowth(current, baseline, label) {
   }
 }
 
+export function assertExactFindings(manifest, findings) {
+  const differences = [];
+  for (const pair of new Set([...manifest.keys(), ...findings.keys()])) {
+    const allowed = manifest.get(pair) ?? 0;
+    const actual = findings.get(pair) ?? 0;
+    if (allowed !== actual)
+      differences.push(
+        `${pair.replace("\0", ": ")}: manifest ${allowed}, findings ${actual}`,
+      );
+  }
+  if (differences.length)
+    throw new Error(
+      `Bootstrap manifest must equal current findings exactly:\n${differences.sort().join("\n")}`,
+    );
+}
+
+const bootstrapSetupFiles = new Set([
+  ".github/workflows/ci.yml",
+  "README.md",
+  "scripts/eslint-policy.mjs",
+  "scripts/lint-ratchet.mjs",
+  "test/scripts/lint-ratchet.test.js",
+  "test/lint-ratchet/integration.test.js",
+  ...["app", "sdk"].flatMap((pkg) =>
+    [
+      "README.md",
+      "eslint.config.js",
+      "eslint-ratchet.json",
+      "tsconfig.json",
+      "tsconfig.eslint.json",
+    ].map((file) => `${pkg}/${file}`),
+  ),
+]);
+
+async function assertBootstrapSources(commit, dir) {
+  const git = (args) => execFileSync("git", args, { cwd: repository });
+  const baseFiles = new Set(
+    git(["ls-tree", "-r", "-z", "--name-only", commit])
+      .toString("utf8")
+      .split("\0")
+      .filter(Boolean),
+  );
+  const files = new Set([
+    ...baseFiles,
+    ...git(["ls-files", "--cached", "--others", "--exclude-standard", "-z"])
+      .toString("utf8")
+      .split("\0")
+      .filter(Boolean),
+  ]);
+  // Check the whole setup PR, including deletions, staged and untracked files.
+  // Also find ignored lint inputs: Git ignore rules cannot hide new source.
+  // The pinned app depends on sdk through both package and relative imports.
+  async function addLintInputs(directory) {
+    let entries;
+    try {
+      entries = await readdir(path.join(repository, directory), {
+        withFileTypes: true,
+      });
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (
+        ["node_modules", ".git"].includes(entry.name) ||
+        (entry.name === "dist" && ["app", "sdk"].includes(directory))
+      )
+        continue;
+      const file = `${directory}/${entry.name}`;
+      if (entry.isDirectory()) await addLintInputs(file);
+      else if (
+        entry.isSymbolicLink() ||
+        /\.(?:[cm]?[jt]s|tsx|jsx)$/u.test(file)
+      )
+        files.add(file);
+    }
+  }
+  for (const pkg of dir === "app" ? ["app", "sdk"] : ["sdk"])
+    await addLintInputs(pkg);
+
+  const changed = [];
+  for (const file of [...files].sort()) {
+    if (bootstrapSetupFiles.has(file) || /^docs\/.*\.md$/u.test(file)) continue;
+    let current;
+    let present = false;
+    try {
+      const target = path.join(repository, file);
+      const info = await lstat(target);
+      present = true;
+      if (info.isFile()) current = await readFile(target);
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+    }
+    const before = baseFiles.has(file)
+      ? git(["show", `${commit}:${file}`])
+      : null;
+    if (!present && !before) continue;
+    if (current && before) {
+      if (current.equals(before)) continue;
+      if (/^(?:(?:app|sdk)\/)?package\.json$/u.test(file)) {
+        const metadata = (bytes) => {
+          const data = JSON.parse(bytes.toString("utf8"));
+          delete data.scripts;
+          return data;
+        };
+        if (isDeepStrictEqual(metadata(current), metadata(before))) continue;
+      }
+    }
+    changed.push(file);
+  }
+  if (changed.length)
+    throw new Error(
+      `Bootstrap setup PR must not change sources; only lint setup, package.json scripts, CI and docs may differ:\n${changed.join("\n")}`,
+    );
+}
+
 export function collectFindings(results, root) {
   const pairs = new Map();
   for (const result of results) {
@@ -117,15 +225,14 @@ export function serializePairs(pairs) {
   );
 }
 
-export async function lintPackage(root, configRoot = root) {
-  const require = createRequire(path.join(configRoot, "package.json"));
+export async function lintPackage(root) {
+  const require = createRequire(path.join(root, "package.json"));
   const { ESLint } = require("eslint");
-  // Use the checked configuration and dependencies even for archived sources.
-  // Both scans bypass bulk suppressions and cover tests and JS/TS tooling.
+  // Scan current sources once, bypassing bulk suppressions.
   const eslint = new ESLint({
     cwd: root,
     applySuppressions: false,
-    overrideConfigFile: path.join(configRoot, "eslint.config.js"),
+    overrideConfigFile: path.join(root, "eslint.config.js"),
     overrideConfig: [
       suppressionGuard,
       {
@@ -135,46 +242,6 @@ export async function lintPackage(root, configRoot = root) {
     ],
   });
   return collectFindings(await eslint.lintFiles(["."]), root);
-}
-
-async function lintBasePackage(commit, dir) {
-  const temporary = await mkdtemp(path.join(tmpdir(), "qns-lint-base-"));
-  try {
-    // App tests import SDK helpers by relative path. Preserve their base types.
-    const packages = dir === "app" ? ["app", "sdk"] : ["sdk"];
-    const archive = path.join(temporary, "base.tar");
-    execFileSync(
-      "git",
-      [
-        "archive",
-        "--format=tar",
-        `--output=${archive}`,
-        commit,
-        "--",
-        ...packages,
-      ],
-      { cwd: repository },
-    );
-    execFileSync("tar", ["-xf", archive, "-C", temporary]);
-    for (const pkg of packages) {
-      const root = path.join(temporary, pkg);
-      const configRoot = path.join(repository, pkg);
-      // The lint project must include the same tests and scripts as the head.
-      for (const file of ["tsconfig.json", "tsconfig.eslint.json"])
-        await copyFile(path.join(configRoot, file), path.join(root, file));
-      await symlink(
-        path.join(configRoot, "node_modules"),
-        path.join(root, "node_modules"),
-        "dir",
-      );
-    }
-    return await lintPackage(
-      path.join(temporary, dir),
-      path.join(repository, dir),
-    );
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
-  }
 }
 
 async function main() {
@@ -218,17 +285,14 @@ async function main() {
       `Missing ${file} at base ${commit}; only the initial migration may add a ledger`,
     );
   } else {
-    const started = performance.now();
-    const baseline = await lintBasePackage(commit, values.dir);
-    assertNoGrowth(previous, baseline, `against base sources (${commit})`);
-    console.log(
-      `lint-ratchet: initial migration baseline against ${commit} (${((performance.now() - started) / 1000).toFixed(2)}s)`,
-    );
+    await assertBootstrapSources(commit, values.dir);
+    console.log(`lint-ratchet: bootstrap sources equal ${commit}`);
   }
 
   const require = createRequire(path.join(root, "package.json"));
   const { format, resolveConfig } = require("prettier");
   const current = await lintPackage(root);
+  if (!exists) assertExactFindings(previous, current);
   assertNoGrowth(current, previous, "against the working ledger");
   const data = serializePairs(current);
   const canonical = await format(JSON.stringify(data), {

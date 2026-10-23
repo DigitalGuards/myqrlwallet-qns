@@ -100,6 +100,28 @@ test("ratchet allows count reductions and resolved pair removal", async () => {
   assertNoGrowth(new Map(), baseline, "against base");
 });
 
+test("bootstrap requires equal pairs and counts, including an empty manifest", async () => {
+  const { assertExactFindings } = await ratchet;
+  const findings = new Map([
+    ["src/index.ts\0rule", 2],
+    ["src/other.ts\0rule", 1],
+  ]);
+  assertExactFindings(new Map([...findings].reverse()), findings);
+  assertExactFindings(new Map(), new Map());
+  for (const manifest of [
+    new Map(),
+    new Map([...findings, ["src/extra.ts\0rule", 1]]),
+    new Map([...findings, ["src/index.ts\0rule", 3]]),
+    new Map([...findings, ["src/index.ts\0rule", 1]]),
+    new Map([["src/index.ts\0rule", 2]]),
+  ]) {
+    assert.throws(
+      () => assertExactFindings(manifest, findings),
+      /Bootstrap manifest must equal current findings exactly/u,
+    );
+  }
+});
+
 test("raw findings preserve per-file counts", async () => {
   const { collectFindings } = await ratchet;
   const message = { ruleId: rule, severity: 2, line: 1, message: "Finding" };
