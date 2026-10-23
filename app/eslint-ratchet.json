@@ -1,0 +1,49 @@
+{
+  "src/App.async-isolation.test.tsx": {
+    "@typescript-eslint/array-type": { "count": 1 },
+    "@typescript-eslint/consistent-type-imports": { "count": 1 }
+  },
+  "src/App.claim-ux.test.tsx": { "@typescript-eslint/no-empty-function": { "count": 2 } },
+  "src/App.recovery-property.test.tsx": { "@typescript-eslint/no-empty-function": { "count": 1 } },
+  "src/App.recovery-settlement.test.tsx": {
+    "@typescript-eslint/consistent-type-imports": { "count": 1 }
+  },
+  "src/App.review-regressions.test.tsx": { "@typescript-eslint/no-empty-function": { "count": 1 } },
+  "src/App.round2-regressions.test.tsx": { "@typescript-eslint/no-empty-function": { "count": 1 } },
+  "src/App.round3-regressions.test.tsx": {
+    "@typescript-eslint/array-type": { "count": 1 },
+    "@typescript-eslint/no-empty-function": { "count": 1 }
+  },
+  "src/App.round4-regressions.test.tsx": { "@typescript-eslint/no-empty-function": { "count": 1 } },
+  "src/App.round5-regressions.test.tsx": {
+    "@typescript-eslint/array-type": { "count": 1 },
+    "@typescript-eslint/no-empty-function": { "count": 1 }
+  },
+  "src/App.round7-regressions.test.tsx": { "@typescript-eslint/no-empty-function": { "count": 1 } },
+  "src/App.round8-regressions.test.tsx": { "@typescript-eslint/no-empty-function": { "count": 3 } },
+  "src/App.settlement.test.tsx": { "@typescript-eslint/consistent-type-imports": { "count": 1 } },
+  "src/App.test.tsx": {
+    "@typescript-eslint/array-type": { "count": 1 },
+    "@typescript-eslint/no-empty-function": { "count": 1 }
+  },
+  "src/App.tsx": {
+    "@typescript-eslint/consistent-type-imports": { "count": 1 },
+    "@typescript-eslint/prefer-nullish-coalescing": { "count": 3 },
+    "@typescript-eslint/prefer-optional-chain": { "count": 3 }
+  },
+  "src/registration-wallets.test.ts": { "@typescript-eslint/no-empty-function": { "count": 1 } },
+  "src/relay-behavior.test.ts": { "@typescript-eslint/array-type": { "count": 1 } },
+  "src/relay-retry-sdk.test.ts": { "@typescript-eslint/no-empty-function": { "count": 1 } },
+  "src/wallet-cancellation.test.ts": { "@typescript-eslint/array-type": { "count": 1 } },
+  "src/wallet-extension.test.ts": { "@typescript-eslint/array-type": { "count": 1 } },
+  "src/wallet-recovery.test.tsx": { "@typescript-eslint/array-type": { "count": 1 } },
+  "src/wallet-transitions.test.ts": { "@typescript-eslint/array-type": { "count": 3 } },
+  "src/wallet.test.ts": {
+    "@typescript-eslint/consistent-type-imports": { "count": 1 },
+    "@typescript-eslint/no-empty-function": { "count": 1 }
+  },
+  "src/wallet.ts": {
+    "@typescript-eslint/array-type": { "count": 1 },
+    "@typescript-eslint/no-empty-function": { "count": 2 }
+  }
+}

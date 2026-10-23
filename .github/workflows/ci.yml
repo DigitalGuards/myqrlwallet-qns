@@ -44,6 +44,8 @@ jobs:
         working-directory: sdk
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -54,6 +56,14 @@ jobs:
 
       - name: Install
         run: nice -n 10 npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Lint ratchet
+        env:
+          LINT_RATCHET_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: npm run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"
 
       - name: Typecheck
         run: npm run typecheck
@@ -70,6 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -90,6 +102,11 @@ jobs:
 
       - name: Lint
         run: nice -n 10 npm --prefix app run lint
+
+      - name: Lint ratchet
+        env:
+          LINT_RATCHET_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: nice -n 10 npm --prefix app run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"
 
       - name: Typecheck
         run: nice -n 10 npm --prefix app run typecheck
