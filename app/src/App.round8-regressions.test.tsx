@@ -92,7 +92,12 @@ it.each(replacementCases)(
       controller.connectExtension({
         id: "com.qrlwallet.extension",
         name: "MyQRLWallet Extension",
-        provider: { request: (args) => chain.request(args), listen: () => () => {} },
+        provider: {
+          request: (args) => chain.request(args),
+          listen: () => () => {
+            // This request-only provider installs no event listeners to remove.
+          },
+        },
       }),
     );
     fireEvent.change(screen.getByLabelText("Transaction hash"), { target: { value: trackedHash } });
@@ -189,7 +194,12 @@ it("keeps the submitted identity usable when pending storage writes fail", async
     controller.connectExtension({
       id: "com.qrlwallet.extension",
       name: "MyQRLWallet Extension",
-      provider: { request: (args) => chain.request(args), listen: () => () => {} },
+      provider: {
+        request: (args) => chain.request(args),
+        listen: () => () => {
+          // This request-only provider installs no event listeners to remove.
+        },
+      },
     }),
   );
   fireEvent.click(
@@ -263,7 +273,12 @@ it.each([false, true])(
       controller.connectExtension({
         id: "com.qrlwallet.extension",
         name: "MyQRLWallet Extension",
-        provider: { request: (args) => chain.request(args), listen: () => () => {} },
+        provider: {
+          request: (args) => chain.request(args),
+          listen: () => () => {
+            // This request-only provider installs no event listeners to remove.
+          },
+        },
       }),
     );
     const names = within(screen.getByRole("region", { name: "My names" }));

@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { registrationName, registrationTransaction, type RpcProvider } from "@qns/sdk";
-import { ACCOUNT, config, MockChain, OTHER } from "../../sdk/src/__tests__/mockProvider";
+import type { MockChain } from "../../sdk/src/__tests__/mockProvider";
+import { ACCOUNT, config, OTHER } from "../../sdk/src/__tests__/mockProvider";
 import { App } from "./App";
 import { TestWallet } from "./__tests__/mockWallet";
 import { savePendingClaim } from "./storage";

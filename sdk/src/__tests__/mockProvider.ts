@@ -53,7 +53,7 @@ export class MockChain implements RpcProvider {
   rejectSend = 0;
   noCode = false;
   afterReceipt: (() => void) | null = null;
-  calls: Array<{ method: string; params?: unknown[] }> = [];
+  calls: { method: string; params?: unknown[] }[] = [];
   sent: SentTransaction[] = [];
   owners = new Map<string, string>();
   resolvers = new Map<string, string>();

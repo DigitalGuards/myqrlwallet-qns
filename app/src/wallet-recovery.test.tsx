@@ -9,7 +9,7 @@ import { extensionAnnouncement, WalletController } from "./wallet";
 const storageKey = `qns:wallet:${config.chainId}:${config.contracts.QNSRegistry ?? "pending"}`;
 const timeoutMessage =
   "Disconnected on this page. The wallet did not answer; remove this site in the extension if it still shows as connected.";
-const stops: Array<() => void> = [];
+const stops: (() => void)[] = [];
 
 function announcement(provider: TestExtension, id = "com.qrlwallet.extension") {
   return { info: { rdns: id, uuid: id, name: "Wallet" }, provider };

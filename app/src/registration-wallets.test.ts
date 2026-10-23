@@ -138,7 +138,9 @@ it("uses the supported extension transaction fields through EIP-6963 discovery",
       account: ACCOUNT,
       transport: "extension",
       primary: true,
-      onUpdate: () => {},
+      onUpdate: () => {
+        // This test inspects submitted wallet requests; progress needs no action.
+      },
     });
     const requests = chain.calls.filter((request) => request.method === "qrl_sendTransaction");
     expect(requests).toHaveLength(5);

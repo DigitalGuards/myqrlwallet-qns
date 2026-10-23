@@ -17,7 +17,11 @@ async function renderConnected(readChain = new MockChain(), walletChain = readCh
   const provider: WalletProvider = {
     request: (args) => walletChain.request(args),
     listen: (event, handler) =>
-      walletChain instanceof TestWallet ? walletChain.listen(event, handler) : () => {},
+      walletChain instanceof TestWallet
+        ? walletChain.listen(event, handler)
+        : () => {
+            // MockChain has no event subscriptions; TestWallet supplies real cleanup above.
+          },
   };
   render(<App config={config} provider={readChain} controller={controller} />);
   await act(() =>
@@ -627,7 +631,7 @@ describe("pending claim recovery", () => {
 });
 
 it("keeps an old approval promise out of a newer claim with the same name and nonce", async () => {
-  const requests: Array<(value: unknown) => void> = [];
+  const requests: ((value: unknown) => void)[] = [];
   class DelayedWallet extends TestWallet {
     override request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
       if (args.method === "qrl_sendTransaction")

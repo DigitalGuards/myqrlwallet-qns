@@ -31,7 +31,12 @@ async function mount(chain: MockChain) {
     controller.connectExtension({
       id: "com.qrlwallet.extension",
       name: "MyQRLWallet Extension",
-      provider: { request: (args) => chain.request(args), listen: () => () => {} },
+      provider: {
+        request: (args) => chain.request(args),
+        listen: () => () => {
+          // This request-only provider installs no event listeners to remove.
+        },
+      },
     }),
   );
   return controller;
@@ -271,7 +276,7 @@ it("preserves a successful receipt when its verification read fails", async () =
 it("stops the network wait as soon as a receipt arrives while record verification is delayed", async () => {
   class DelayedVerification extends MockChain {
     hold = false;
-    resumes: Array<() => void> = [];
+    resumes: (() => void)[] = [];
     override request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
       if (this.hold && args.method === "qrl_call")
         return new Promise((resolve) => {

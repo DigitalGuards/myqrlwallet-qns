@@ -69,7 +69,9 @@ it("rejects the zero signer before reading or sending", async () => {
       account: ZERO_ADDRESS,
       transport: "extension",
       primary: false,
-      onUpdate: () => {},
+      onUpdate: () => {
+        // Invalid-account rejection and the absence of RPC calls are checked below.
+      },
     }),
   ).rejects.toThrow("nonzero");
   expect(chain.calls).toHaveLength(0);
@@ -140,13 +142,13 @@ it.each(["confirmed", "skipped"] as const)(
   },
 );
 
-const guards: Array<{
+const guards: {
   guard: string;
   after: RegistrationStep;
   next: RegistrationStep;
   signature: string;
   node: string;
-}> = [
+}[] = [
   ...(["register", "resolver", "address", "name"] as const).map((after) => ({
     guard: `owner after ${after}`,
     after,

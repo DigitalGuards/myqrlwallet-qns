@@ -40,7 +40,7 @@ import {
   savePendingClaim,
   type PendingClaim,
 } from "./storage";
-import { WalletController } from "./wallet";
+import type { WalletController } from "./wallet";
 import { useNameState, type NameResult } from "./useNameState";
 import {
   ClaimProgress,
@@ -460,8 +460,7 @@ export function App({
   }
   async function claim(target = search, makePrimary = primary): Promise<void> {
     if (
-      !target ||
-      !target.setup ||
+      !target?.setup ||
       (!target.available && target.owner !== wallet.account) ||
       setupComplete(target.setup, makePrimary) ||
       !wallet.account ||
@@ -506,7 +505,7 @@ export function App({
         onUpdate: (update) => {
           // Preserve the original account's submitted operation after a wallet switch.
           const saved = savedClaim(account);
-          if (abort.signal.aborted && (!saved || saved.attemptId !== attemptId)) return;
+          if (abort.signal.aborted && saved?.attemptId !== attemptId) return;
           recordSubmission(scope, update, makePrimary);
         },
       });
@@ -731,14 +730,14 @@ export function App({
   const selection = getSelection();
   const recovery = pending ? { ...claimScope(pending), primary: pending.primary ?? false } : null;
   const tracked =
-    flow && flow.node === selection.node
+    flow?.node === selection.node
       ? flow
       : recovery && (selection.requestId === 0 || recovery.node === selection.node)
         ? recovery
         : null;
   const updates =
     tracked && updateState && sameClaimRequest(tracked, updateState.scope) ? updateState.items : [];
-  const showProgress = deployed && (tracked || (search && canClaim));
+  const showProgress = deployed && (tracked ?? (search && canClaim));
   const progress = {
     name:
       tracked?.name ??
@@ -865,7 +864,7 @@ export function App({
                 <h2 id="register-title">Find your .qrl name</h2>
                 <p>Use letters, numbers and hyphens.</p>
               </div>
-              {deployed && (showProgress || !search || !wallet.account) && (
+              {deployed && (Boolean(showProgress) || !search || !wallet.account) && (
                 <ClaimSummary {...progress} />
               )}
               {!deployed && (
@@ -1003,7 +1002,8 @@ export function App({
                       View tracked transaction
                     </a>
                   )}
-                  {(pending.update.hash || pending.trackedHash) && (
+                  {((pending.update.hash === "" ? undefined : pending.update.hash) ??
+                    pending.trackedHash) && (
                     <button
                       className="secondary mt-4 w-full"
                       disabled={checkingPending}

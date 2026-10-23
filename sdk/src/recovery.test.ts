@@ -15,7 +15,7 @@ import { reverseNodeFor } from "./resolver.js";
 
 const hash = `0x${"d".repeat(64)}`;
 const pending: TransactionUpdate = { step: "register", status: "unconfirmed", hash, nonce: "0x7" };
-const transports: Array<"relay" | "extension"> = ["relay", "extension"];
+const transports: ("relay" | "extension")[] = ["relay", "extension"];
 
 class RecoveryChain extends MockChain {
   transaction: unknown = {

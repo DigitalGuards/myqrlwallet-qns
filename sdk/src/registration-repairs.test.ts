@@ -89,7 +89,9 @@ describe("remaining setup writes", () => {
         transport: "extension",
         primary: makePrimary,
         plan,
-        onUpdate: () => {},
+        onUpdate: () => {
+          // The repair plan is checked against submitted transactions and final records.
+        },
       });
       expect(chain.sent.map((tx) => tx.data)).toEqual(
         required.map((step) => registrationTransaction(parsed.name, ACCOUNT, step, config).data),
@@ -101,7 +103,7 @@ describe("remaining setup writes", () => {
 
 type Failure =
   "RPC" | "registry" | "estimate" | "wallet" | "chain" | "account" | "postverification";
-const failures: Array<{ failure: Failure; message: string; sent: number }> = [
+const failures: { failure: Failure; message: string; sent: number }[] = [
   { failure: "RPC", message: "RPC unavailable", sent: 0 },
   { failure: "registry", message: "execution reverted: registry unavailable", sent: 0 },
   { failure: "estimate", message: "Gas estimate unavailable", sent: 0 },
@@ -162,7 +164,9 @@ it.each(failures)(
         account: ACCOUNT,
         transport: "extension",
         primary: true,
-        onUpdate: () => {},
+        onUpdate: () => {
+          // Failure propagation and the number of submitted transactions are checked below.
+        },
       }),
     ).rejects.toThrow(message);
     expect(chain.sent).toHaveLength(sent);
@@ -240,7 +244,9 @@ it("requires a new plan when records change after the approval preview", async (
       transport: "extension",
       primary: false,
       plan,
-      onUpdate: () => {},
+      onUpdate: () => {
+        // The stale plan must reject before sending; progress needs no action.
+      },
     }),
   ).rejects.toThrow("Name records changed");
   expect(chain.sent).toHaveLength(0);
@@ -266,7 +272,9 @@ it("stops before an unplanned write when records change during an approval", asy
       transport: "extension",
       primary: false,
       plan,
-      onUpdate: () => {},
+      onUpdate: () => {
+        // The mid-repair change is checked through rejection and submitted transactions.
+      },
     }),
   ).rejects.toThrow("Name records changed");
   expect(chain.sent.map((tx) => tx.data)).toEqual([

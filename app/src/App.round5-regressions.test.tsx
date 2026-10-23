@@ -29,7 +29,12 @@ async function mount(chain: MockChain, provider: RpcProvider = chain) {
     controller.connectExtension({
       id: "com.qrlwallet.extension",
       name: "MyQRLWallet Extension",
-      provider: { request: (args) => chain.request(args), listen: () => () => {} },
+      provider: {
+        request: (args) => chain.request(args),
+        listen: () => () => {
+          // This request-only provider installs no event listeners to remove.
+        },
+      },
     }),
   );
 }
@@ -52,7 +57,7 @@ it.each(["partial", "complete", "failed", "loading"] as const)(
       arm = false;
       head = "0x20";
       refreshMode = false;
-      resumes: Array<() => void> = [];
+      resumes: (() => void)[] = [];
       reject: (() => void) | undefined;
       override request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
         if (args.method === "qrl_blockNumber") {

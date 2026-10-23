@@ -6,7 +6,7 @@ import { TestWallet } from "./__tests__/mockWallet";
 import { createRelay, extensionAnnouncement, WalletController } from "./wallet";
 
 const storageKey = `qns:wallet:${config.chainId}:${config.contracts.QNSRegistry ?? "pending"}`;
-const stops: Array<() => void> = [];
+const stops: (() => void)[] = [];
 
 function extension(account = ACCOUNT, id = "com.qrlwallet.extension") {
   const provider = new TestExtension();
@@ -197,8 +197,8 @@ it("keeps selection and controls while the reused helper completes an earlier re
   provider.revocation = revocation;
   const closing = controller.disconnect();
   const connecting = controller.connectExtension(choice);
-  const remembered: Array<string | null> = [];
-  const controls: Array<string | null> = [];
+  const remembered: (string | null)[] = [];
+  const controls: (string | null)[] = [];
   const unsubscribe = controller.subscribe(() => {
     remembered.push(localStorage.getItem(storageKey));
     controls.push(controller.getSnapshot().transport);
