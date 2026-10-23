@@ -8,9 +8,11 @@ The shared [wallet policy](../scripts/eslint-policy.mjs) adds separate type impo
 
 Each package has one `eslint-ratchet.json`, consumed by `npm run lint` through the explicit `--suppressions-location` option. There are no rule-off debt overrides or second allowance file. The shared [ratchet checker](../scripts/lint-ratchet.mjs) rescans the same files with `applySuppressions: false`, sets `TSESTREE_SINGLE_RUN=false`, and compares exact file/rule counts against both the working ledger and a Git base. Directive findings, ruleless diagnostics, warnings, and parser failures cannot become allowances. Alternate bulk-suppression files cannot hide findings from this scan.
 
-`npm run lint:ratchet` defaults to `origin/main`. Pass `-- --base-ref <ref>` to select a base. Pair additions and count increases fail. Stale entries or counts also fail the check. After fixing debt, `npm run lint:ratchet:update` can only lower counts and remove resolved pairs; it refuses new debt. Historical ledgers are parsed as JSON without executing historical code. The initial migration allows a missing base ledger only at the pinned source revision above; subsequent bases must contain the ledger, including an empty `{}` after completion.
+`npm run lint:ratchet` defaults to `origin/main`. Pass `-- --base-ref <ref>` to select a base. Pair additions and count increases fail. Stale entries or counts also fail the check. After fixing debt, `npm run lint:ratchet:update` can only lower counts and remove resolved pairs; it refuses new debt. Historical ledgers are parsed as JSON without executing historical code.
 
-The existing `app` and `sdk` CI jobs retain their names, fetch full history, and explicitly run lint, the ratchet, and typecheck before tests. Pull requests pass `github.event.pull_request.base.sha` to the checker; main pushes use `github.event.before`. The existing format, build, and test gates remain in place.
+The initial migration allows a missing base ledger only at the pinned source revision above. The checker exports that revision's complete package with `git archive` into a temporary directory, copies the checked revision's TypeScript configurations, and links its installed dependencies. App exports also include the base SDK sources because app tests import SDK helpers by relative path. It lints the archived source, tests, and scripts with the checked revision's ESLint configuration, rebasing `tsconfigRootDir` to the export. Both scans use `TSESTREE_SINGLE_RUN=false`, bypass bulk suppressions, and enforce the directive guard. Every proposed manifest pair must exist in the base findings at an equal or higher count. Temporary exports are removed on success and failure, and the checker reports the bootstrap scan duration. Subsequent bases must contain the ledger, including an empty `{}` after completion, and retain the existing manifest comparison.
+
+The existing `app` and `sdk` CI jobs retain their names, fetch full history, and explicitly run lint, the ratchet, and typecheck before tests. Pull requests pass `github.event.pull_request.base.sha` to the checker; main pushes use `github.event.before`. Each package job also runs `test/lint-ratchet/integration.test.js` with `LINT_RATCHET_TEST_PACKAGE` set to its package name. The existing format, build, and test gates remain in place.
 
 | Package | Findings | Exact file/rule pairs | Files with debt |
 | ------- | -------: | --------------------: | --------------: |
@@ -76,18 +78,22 @@ The proposed cleanup slices are independent. Each slice should rerun the package
 
 This is a counted ratchet: CI rejects new file/rule pairs and increases within an existing pair. A replacement finding in the same pair with an equal or lower count requires code review. An empty ledger gives full enforcement without allowances.
 
-Local validation used Node `v22.22.3` and npm `10.9.8`. Every requested gate passed. The ratchet also passed with `CI=true` and an explicit `--base-ref origin/main`, resolving to the source revision recorded above.
+Bootstrap validation used `CI=true`, Node `v20.20.2` for the SDK and ratchet unit tests, Node `v22.22.3` for the app, and npm `10.9.8`. Package gates ran sequentially in fresh processes using the installed dependencies. The explicit `--base-ref origin/main` resolved to the pinned source revision above. Every gate below exited 0.
 
-| Command                | app exit code | sdk exit code |
-| ---------------------- | ------------: | ------------: |
-| `npm ci`               |             0 |             0 |
-| `npm run format:check` |             0 |             0 |
-| `npm run lint`         |             0 |             0 |
-| `npm run lint:ratchet` |             0 |             0 |
-| `npm run typecheck`    |             0 |             0 |
-| `npm test`             |             0 |             0 |
-| `npm run build`        |             0 |             0 |
+| Command                                          | app exit code | sdk exit code |
+| ------------------------------------------------ | ------------: | ------------: |
+| `npm run format:check`                           |             0 |             0 |
+| `npm run lint`                                   |             0 |             0 |
+| `npm run lint:ratchet -- --base-ref origin/main` |             0 |             0 |
+| `npm run typecheck`                              |             0 |             0 |
+| `npm run test`                                   |             0 |             0 |
+| `npm run build`                                  |             0 |             0 |
+| Ratchet integration tests                        |             0 |             0 |
 
-App tests: 29 files and 19,256 tests passed. SDK tests: 14 files and 271 tests passed. The new `node --test test/scripts/lint-ratchet.test.js` regression suite passed all 9 tests with exit code 0 and runs in the existing CI scripts job. Twelve additional integration checks passed with exit code 0 across the two installed package toolchains: typed coverage outside source directories, repeated CI parses, alternate suppression files, count growth within a pair, inline and TypeScript directives, and CLI refusal to regenerate new debt. Temporary probe files were removed.
+The standalone ratchet took 18.85 seconds for the app and 7.49 seconds for the SDK, including bootstrap export, lint, and cleanup times of 9.15 and 4.31 seconds respectively. These are local CI-like timings. The manifests remain byte-for-byte unchanged at 41 app findings and 16 SDK findings.
 
-The final diff contains lint setup, the census, CI wiring, and ratchet regression tests. Application and SDK source, existing tests, dependency metadata, and lockfiles are unchanged. No commit or push was made.
+App tests: 29 files and 19,256 tests passed. SDK tests: 14 files and 271 tests passed. `node --test test/scripts/lint-ratchet.test.js` passed all 9 tests with exit code 0 in 0.13 seconds and runs in the existing CI scripts job.
+
+`node --test test/lint-ratchet/integration.test.js` runs both installed packages by default; CI selects each package with `LINT_RATCHET_TEST_PACKAGE`. All 10 scenarios per package passed: unchanged manifests against bootstrap and existing-ledger bases, new `any` with and without an allowance, regeneration refusal, count growth from 1 to 2, typed unsafe assignment with an allowance, alternate suppression files, disable comments, inline overrides, mixed-case TypeScript directives, and repeated typed scans across source, tests, and scripts. The typed assignment probe also prevents missing sibling SDK imports from inflating the app's bootstrap allowances. The suite verifies temporary-export cleanup and uses current configuration even when the historical configuration would throw if executed. App integration tests exited 0 in 174.99 seconds; SDK integration tests exited 0 in 79.94 seconds.
+
+The bootstrap fix changes the shared checker, CI integration-test wiring, this census, and the new integration suite. Application and SDK source, existing tests, dependency metadata, and lockfiles are unchanged. Changes remain uncommitted.

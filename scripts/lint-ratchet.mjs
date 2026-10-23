@@ -1,8 +1,16 @@
 #!/usr/bin/env node
 // One counted ledger per package. All lint rules stay enabled.
 import { execFileSync } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -109,6 +117,66 @@ export function serializePairs(pairs) {
   );
 }
 
+export async function lintPackage(root, configRoot = root) {
+  const require = createRequire(path.join(configRoot, "package.json"));
+  const { ESLint } = require("eslint");
+  // Use the checked configuration and dependencies even for archived sources.
+  // Both scans bypass bulk suppressions and cover tests and JS/TS tooling.
+  const eslint = new ESLint({
+    cwd: root,
+    applySuppressions: false,
+    overrideConfigFile: path.join(configRoot, "eslint.config.js"),
+    overrideConfig: [
+      suppressionGuard,
+      {
+        files: ["**/*.{ts,tsx,mts,cts}"],
+        languageOptions: { parserOptions: { tsconfigRootDir: root } },
+      },
+    ],
+  });
+  return collectFindings(await eslint.lintFiles(["."]), root);
+}
+
+async function lintBasePackage(commit, dir) {
+  const temporary = await mkdtemp(path.join(tmpdir(), "qns-lint-base-"));
+  try {
+    // App tests import SDK helpers by relative path. Preserve their base types.
+    const packages = dir === "app" ? ["app", "sdk"] : ["sdk"];
+    const archive = path.join(temporary, "base.tar");
+    execFileSync(
+      "git",
+      [
+        "archive",
+        "--format=tar",
+        `--output=${archive}`,
+        commit,
+        "--",
+        ...packages,
+      ],
+      { cwd: repository },
+    );
+    execFileSync("tar", ["-xf", archive, "-C", temporary]);
+    for (const pkg of packages) {
+      const root = path.join(temporary, pkg);
+      const configRoot = path.join(repository, pkg);
+      // The lint project must include the same tests and scripts as the head.
+      for (const file of ["tsconfig.json", "tsconfig.eslint.json"])
+        await copyFile(path.join(configRoot, file), path.join(root, file));
+      await symlink(
+        path.join(configRoot, "node_modules"),
+        path.join(root, "node_modules"),
+        "dir",
+      );
+    }
+    return await lintPackage(
+      path.join(temporary, dir),
+      path.join(repository, dir),
+    );
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -150,21 +218,17 @@ async function main() {
       `Missing ${file} at base ${commit}; only the initial migration may add a ledger`,
     );
   } else {
-    console.log(`lint-ratchet: initial migration baseline against ${commit}`);
+    const started = performance.now();
+    const baseline = await lintBasePackage(commit, values.dir);
+    assertNoGrowth(previous, baseline, `against base sources (${commit})`);
+    console.log(
+      `lint-ratchet: initial migration baseline against ${commit} (${((performance.now() - started) / 1000).toFixed(2)}s)`,
+    );
   }
 
   const require = createRequire(path.join(root, "package.json"));
-  const { ESLint } = require("eslint");
   const { format, resolveConfig } = require("prettier");
-  // This scan bypasses every bulk suppression file, including alternate names.
-  // Keep the same complete file selection as npm run lint, including JS tooling.
-  const eslint = new ESLint({
-    cwd: root,
-    applySuppressions: false,
-    overrideConfigFile: path.join(root, "eslint.config.js"),
-    overrideConfig: suppressionGuard,
-  });
-  const current = collectFindings(await eslint.lintFiles(["."]), root);
+  const current = await lintPackage(root);
   assertNoGrowth(current, previous, "against the working ledger");
   const data = serializePairs(current);
   const canonical = await format(JSON.stringify(data), {

@@ -65,6 +65,11 @@ jobs:
           LINT_RATCHET_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: npm run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"
 
+      - name: Ratchet integration tests
+        env:
+          LINT_RATCHET_TEST_PACKAGE: sdk
+        run: node --test ../test/lint-ratchet/integration.test.js
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -107,6 +112,11 @@ jobs:
         env:
           LINT_RATCHET_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: nice -n 10 npm --prefix app run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"
+
+      - name: Ratchet integration tests
+        env:
+          LINT_RATCHET_TEST_PACKAGE: app
+        run: nice -n 10 node --test test/lint-ratchet/integration.test.js
 
       - name: Typecheck
         run: nice -n 10 npm --prefix app run typecheck
