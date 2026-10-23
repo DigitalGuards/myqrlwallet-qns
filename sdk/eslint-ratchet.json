@@ -1,0 +1,20 @@
+{
+  "src/__tests__/mockProvider.ts": { "@typescript-eslint/array-type": { "count": 1 } },
+  "src/owned.test.ts": { "@typescript-eslint/array-type": { "count": 1 } },
+  "src/owned.ts": { "@typescript-eslint/prefer-regexp-exec": { "count": 1 } },
+  "src/record-recovery.test.ts": { "@typescript-eslint/no-empty-function": { "count": 1 } },
+  "src/recovery.test.ts": { "@typescript-eslint/array-type": { "count": 1 } },
+  "src/registration-guards.test.ts": {
+    "@typescript-eslint/array-type": { "count": 1 },
+    "@typescript-eslint/no-empty-function": { "count": 1 }
+  },
+  "src/registration-read-errors.test.ts": {
+    "@typescript-eslint/no-empty-function": { "count": 1 }
+  },
+  "src/registration-repairs.test.ts": {
+    "@typescript-eslint/array-type": { "count": 1 },
+    "@typescript-eslint/no-empty-function": { "count": 4 }
+  },
+  "src/registration.ts": { "@typescript-eslint/array-type": { "count": 1 } },
+  "src/resolver.test.ts": { "@typescript-eslint/array-type": { "count": 2 } }
+}
