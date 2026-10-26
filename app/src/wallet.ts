@@ -6,7 +6,7 @@ import {
   createExtensionSession,
   type ExtensionSession,
   type ExtensionSessionState,
-} from "./extensionSession";
+} from "@qrlwallet/connect-ui/extension";
 
 type Handler = (payload?: unknown) => void;
 type WalletEvent =
@@ -461,6 +461,10 @@ export class WalletController {
         },
         {
           validateAccount: isCurrentQrlAddress,
+          // This page runs its own revocation deadline and revoke barrier (see
+          // disconnect() and trackRevocation), so the helper's built-in deadline
+          // is set to its maximum and the page's tested behaviour stays as is.
+          revokeTimeoutMs: 2_147_483_647,
           onStateChange: (state) => {
             // Activation owns the UI while the helper finishes its previous revoke.
             if (generation === this.generation && !this.extension?.waiting)
