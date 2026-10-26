@@ -21,11 +21,11 @@
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.2.8",
-    "@fontsource-variable/sora": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/sora": "^5.2.8",
     "@qns/sdk": "file:../sdk",
     "@qrlwallet/connect": "5.0.2",
-    "@qrlwallet/connect-ui": "0.3.0",
+    "@qrlwallet/connect-ui": "0.4.0",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
