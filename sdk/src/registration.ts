@@ -331,7 +331,7 @@ export async function readRegistrationState(
       resolver: resolver !== publicResolver,
       address: destination.address !== canonicalAddress(account),
       name: destination.spelling !== name,
-      primary: reverseName !== name,
+      primary: !matchesStoredName(reverseName, name),
     },
   };
 }
@@ -617,6 +617,16 @@ async function send(
   }
 }
 
+function matchesStoredName(stored: string | null, name: string): boolean {
+  if (stored === null) return false;
+  try {
+    return normalize(stored) === name;
+  } catch (error) {
+    if (!(error instanceof QnsNameError)) throw error;
+    return false;
+  }
+}
+
 /** Reverse and registry reads stay strict. Forward records use the per-name resolver tolerance. */
 export async function readPrimaryState(
   account: string,
@@ -626,13 +636,15 @@ export async function readPrimaryState(
   const reverseName = await lookupAddress(account, { registry, provider });
   if (!reverseName) return { primary: null, reverseName };
   let forward: string | null;
+  let normalizedName: string | null = null;
   try {
-    const resolver = await getResolver(reverseName, { registry, provider });
+    normalizedName = normalize(reverseName);
+    const resolver = await getResolver(normalizedName, { registry, provider });
     forward =
       resolver === null
         ? null
         : await readResolverRecord(
-            nodeToHex(namehash(normalize(reverseName))),
+            nodeToHex(namehash(normalizedName)),
             resolver,
             provider,
             "latest",
@@ -647,7 +659,7 @@ export async function readPrimaryState(
   return {
     primary:
       forward !== null && canonicalAddress(forward) === canonicalAddress(account)
-        ? reverseName
+        ? normalizedName
         : null,
     reverseName,
   };
@@ -722,7 +734,7 @@ export async function registerName(input: string, options: RegistrationOptions):
     await requireSpelling();
     // A broken previous primary remains repairable; transport and reverse reads stay strict.
     const primaryState = await readPrimaryState(account, registry, options.provider);
-    if (primaryState.reverseName === name && primaryState.primary !== name)
+    if (matchesStoredName(primaryState.reverseName, name) && primaryState.primary !== name)
       throw new IncompleteRegistrationError();
     return primaryState.primary !== name;
   }

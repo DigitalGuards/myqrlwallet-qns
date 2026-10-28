@@ -38,8 +38,8 @@ Network configs accept `deploymentBlock`, a positive safe integer identifying th
 ## Build and test
 
 ```bash
-npm install
-npm --prefix sdk install
+npm ci
+npm --prefix sdk ci
 npm test
 ```
 
@@ -100,7 +100,27 @@ npm run verify:pq
 
 The local config must declare `"qrl2PrecompileSet": "qrl2-pq-v1"`. Deployment verifies the exact compiler, source, ABI, and bytecode hashes, checks the chain ID, and executes live 64-byte ML-DSA-87 slot 3 plus SHAKE256 slot 6 probes before its first transaction. The command-scoped public account selector is accepted only when the configured RPC URL has a loopback host and the connected chain ID matches the pinned local chain. Chain `3151908` is the default; set `QNS_PUBLIC_DEV_CHAIN_ID` in the same command when a fresh isolated enclave deliberately uses another chain ID. When explicitly set, the selector takes precedence over a `TESTNET_SEED` in the ignored `.env`. Keep both public-development selectors out of persistent `.env` files. Use `TESTNET_SEED` for other development networks. Never put a private seed in tracked files or shell history.
 
-The initial deployment account remains the owner of `Root`, a Root controller, and the owner of `ReverseRegistrar`. Treat that account as an alpha administrator until the community selects a governance owner and an explicit controller-revocation plus ownership-transfer procedure. Do not renounce these roles before verifying the complete handoff on the target network.
+The initial deployment account owns `Root`, is a Root controller, owns `ReverseRegistrar`, and directly owns the `reverse` registry node. Root owns the root node, FIFSQRLRegistrar owns `qrl`, and ReverseRegistrar owns `addr.reverse`; both top-level labels start unlocked. ReverseRegistrar starts with no controllers, and the resolver trusts it for `setName`. Ownable transfers and renunciation preserve controller roles.
+
+Never call `renounceOwnership` on Root or ReverseRegistrar. Renunciation is irreversible. Renouncing Root while any controller is enabled leaves that controller with permanent power over every unlocked top-level label. The handoff never renounces.
+
+The [deployment governance guide](docs/DEPLOYMENT-GOVERNANCE.md) documents the complete inventory, configuration and recovery limits. The handoff checklist is:
+
+1. Verify chain and genesis, deployment wiring, every discovered top-level owner, the root and `addr.reverse` owners, both administrative owners and controller sets, the locks, the default resolver and the trusted reverse registrar.
+2. Assign `reverse` to its configured final owner through its current registry or Root authority: the governance account or Root itself receives it.
+3. Optionally lock `qrl` and then `reverse`, after verifying their final owners. The expected `qrl` owner is FIFSQRLRegistrar.
+4. Add the reviewed Root controller set, which may be empty.
+5. Revoke the deployer's Root controller role and any deployer ReverseRegistrar controller role.
+6. Transfer Root ownership, then ReverseRegistrar ownership, to the configured final owner.
+7. Run the read-only power check and verify that the resolver's trusted reverse registrar equals the owner of `addr.reverse`.
+
+Locking permanently prevents Root from reassigning a label; Root has no unlock. Locking `qrl` while the alpha FIFSQRLRegistrar owns it binds `.qrl` to that registrar forever because it cannot transfer the node. Use `"lockLabels": []` until the long-lived registrar holds `qrl`. For `reverse`, the current registry owner retains its own powers after a Root lock. The deployer can transfer its own `reverse` directly through the registry even when locked. Giving `reverse` to Root and locking it permanently prevents replacing its owner or `addr.reverse` through that parent, because Root has no method to manage its children. Giving it to the final governance contract preserves that contract's parent-level registry powers. Review these permanent consequences before locking.
+
+Set `handoff.finalOwner`, `handoff.rootControllers`, `handoff.reverseOwner` (`finalOwner` or `root`) and `handoff.lockLabels` in the ignored deployment record. Supply exact checksummed addresses for the final owner and Root controllers. The final owner must differ from the deployer and every configured contract. The handoff requires code at those destinations and refuses an externally owned final account. It requires `powerCheck.controllerMode: "events"`, complete log history and explicit `powerCheck.topLevelOwners` expectations for additional nonzero top-level owners.
+
+After `npm run sdk:build`, set shell `QNS_CONFIG` and review `npm run handoff -- --dry-run`. The default `npm run handoff` also performs a dry run. Output includes exact calls, before/projected-after state, one `PERMANENT:` line per planned lock, a SHA-256 plan hash and the command `npm run handoff -- --execute <hash>`. Execution requires that hash to match the live plan before loading a key. It ignores `QNS_CONFIG` from `.env`; only execution reads the three allowed signer variables from that file, with shell values winning. After interruption and transaction settlement, review a fresh dry run and execute the remaining plan with its new hash.
+
+Run `npm run check:powers` with the same `QNS_CONFIG` to verify the handoff. `npm run check:powers -- --report-only` reports the current alpha state. Strict checks fail for unexpected power or active holders without code. Read-only list mode states its limited discovery coverage. Deployment retains the existing testnet behavior and prints these operator instructions.
 
 Validated locally on 2026-08-26: the execution, beacon, and validator services produced blocks with chain ID `3151908` and genesis activation `qrl2PQPrecompilesTime: 0`. Six current Hyperion contracts deployed. A fresh `.qrl` name passed forward resolution, reverse resolution, and forward confirmation through the SDK. All nine direct and wrapped PQ checks passed, including the SHAKE256 vector, valid and invalid ML-DSA-87 calls, mutated digest and public-key rejection, context lengths 0 and 255, cross-context rejection, and the exact 64-byte digest boundary. The live Hyperion behavior suite passed its eight lifecycle and authorization subtests. Every observed Kurtosis host mapping was loopback-only, and block height advanced during the final health probe. The validated enclave and RPC proxy were subsequently stopped to release host resources.
 

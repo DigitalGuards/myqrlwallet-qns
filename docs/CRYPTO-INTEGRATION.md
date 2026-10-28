@@ -41,6 +41,7 @@ valid = ML-DSA-87.Verify(digest, signature, public_key, context)
 
 ## Security properties
 
+- QNS node hashes and reverse-label hashes are 32-byte Keccak-256 outputs. Reverse labels encode the 64-byte address space as 128 lowercase hexadecimal characters before hashing. A generic second-preimage search against a fixed label hash or node therefore costs about 2^128 quantum work under the ideal-hash assumption. The 64-byte address width does not raise this 256-bit hash's second-preimage margin. This bound concerns a fixed target; collision resistance is a separate property. These cryptographic assumptions remain outside the formal control-flow proofs.
 - The verifier uses FIPS 204 ML-DSA-87 through the currently resolved go-qrllib replacement at commit `a6d78f111b1f`. The go-qrl module declares `theQRL/go-qrllib v0.8.0` and replaces it with that fork commit, so release provenance must identify the resolved code explicitly.
 - Context length is capped at 255 bytes as required by ML-DSA.
 - QNS uses explicit domain separation to prevent cross-protocol replay.

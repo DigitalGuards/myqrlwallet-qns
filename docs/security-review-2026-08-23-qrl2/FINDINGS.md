@@ -74,7 +74,13 @@ The start path previously rebuilt only missing images and accepted any existing 
 
 Severity: Low design risk. Status: Open before production.
 
-After `deploy-testnet.js`, the deployer remains the owner of `Root`, a Root controller, and the owner of `ReverseRegistrar`. This is explicit alpha administration and allows later wiring changes. Production deployment needs a reviewed destination owner, controller revocation, ownership transfers, and post-handoff verification. Renunciation is irreversible and is not automated without an agreed governance target.
+After `deploy-testnet.js`, the deployer owns `Root`, is a Root controller, owns `ReverseRegistrar`, and directly owns `reverse` in the registry. Root owns the root node, FIFSQRLRegistrar owns `qrl`, and ReverseRegistrar owns `addr.reverse`; neither top-level label is locked. ReverseRegistrar starts with no controllers. Ownership transfers and renunciation preserve controller roles.
+
+The [governance checklist](../DEPLOYMENT-GOVERNANCE.md) assigns `reverse` to its configured final owner, optionally locks `qrl` and then `reverse` after exact owner checks, adds reviewed Root controllers, revokes deployer controller roles, then transfers Root and ReverseRegistrar ownership. Root locks permanently remove its reassignment power. Locking `qrl` while the alpha FIFSQRLRegistrar owns it binds `.qrl` to that registrar forever because the registrar cannot transfer the node. Leave `lockLabels` empty until the long-lived registrar holds `qrl`. A `reverse` lock preserves its current registry owner's powers; assigning it to Root and locking it prevents changing its owner or replacing `addr.reverse` through that parent. A deployer-owned `reverse` can still be transferred directly through the registry.
+
+Never call `renounceOwnership` on Root or ReverseRegistrar. Renunciation is irreversible. Renouncing Root while any controller is enabled leaves that controller with permanent power over every unlocked top-level label. The handoff never renounces.
+
+The script defaults to dry run and binds explicit execution to its reviewed SHA-256 plan hash. Recovery from partial completion requires a fresh dry run and the remaining plan's new hash. Handoff preflight requires contract destinations, valid checksums, SDK deployment wiring checks, event discovery and positive controls on controller and top-level label history. The read-only power check reports direct owners, discovered top-level labels, controllers, locks and reverse-registrar trust. Governance selection and target-network execution remain open before production; these script tests use mocked providers.
 
 ## QRL2-009: Hyperion migration removed registry lifecycle unit coverage
 

@@ -199,9 +199,8 @@ export async function resolveLegacyAddr(name: string, config: QnsConfig): Promis
  * Reverse lookup: given a 64-byte QRL address (`0x...` or `Q...`),
  * return the primary name set on its `addr.reverse` record, or null.
  *
- * Following ENS convention, this does NOT forward-confirm (the caller
- * should re-resolve and check equality if trust is required). Forward-
- * confirm helper lives at `verifyReverse`.
+ * The returned string is unverified and unsafe for identity display.
+ * Use `verifyReverse` to normalize and forward-confirm a display name.
  */
 export async function lookupAddress(addr: string, config: QnsConfig): Promise<string | null> {
   const node = reverseNodeFor(addr);
@@ -220,7 +219,7 @@ export async function lookupAddress(addr: string, config: QnsConfig): Promise<st
 /**
  * Convenience wrapper that calls `lookupAddress` and then re-resolves the
  * returned name to confirm it maps back to the given address (via the
- * native `addr(bytes32)` record). Returns the name only on match.
+ * native `addr(bytes32)` record). Returns the normalized name only on match.
  * Returns null when no reverse is set, or the name doesn't forward-resolve
  * to the expected address.
  */
@@ -228,8 +227,10 @@ export async function verifyReverse(addr: string, config: QnsConfig): Promise<st
   const name = await lookupAddress(addr, config);
   if (!name) return null;
   let forwardAddr: string | null;
+  let normalizedName: string;
   try {
-    forwardAddr = await resolveName(name, config);
+    normalizedName = normalize(name);
+    forwardAddr = await resolveName(normalizedName, config);
   } catch (err) {
     // A stored reverse name that fails normalization cannot forward-confirm.
     if (err instanceof QnsNameError) return null;
@@ -237,5 +238,5 @@ export async function verifyReverse(addr: string, config: QnsConfig): Promise<st
   }
   if (!forwardAddr) return null;
   const canonical = "q" + stripAddrPrefix(addr);
-  return forwardAddr.toLowerCase() === canonical ? name : null;
+  return forwardAddr.toLowerCase() === canonical ? normalizedName : null;
 }

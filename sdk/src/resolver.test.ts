@@ -165,20 +165,23 @@ describe("QNS resolver provider compatibility", () => {
     );
   });
 
-  it("decodes reverse names and forward-confirms the native address", async () => {
-    let call = 0;
-    const provider: RpcProvider = {
-      request() {
-        call += 1;
-        if (call === 1 || call === 3) return Promise.resolve(`0x${RESOLVER_HEX}`);
-        if (call === 2) return Promise.resolve(encodedString("alice.qrl"));
-        return Promise.resolve(`0x${ACCOUNT.slice(1)}`);
-      },
-    };
-    const config = { registry: REGISTRY, provider };
+  it.each(["alice.qrl", "ALIce.QRL", "0xAB.qrl"])(
+    "returns the normalized verified reverse name for %s",
+    async (storedName) => {
+      let call = 0;
+      const provider: RpcProvider = {
+        request() {
+          call += 1;
+          if (call === 1 || call === 3) return Promise.resolve(`0x${RESOLVER_HEX}`);
+          if (call === 2) return Promise.resolve(encodedString(storedName));
+          return Promise.resolve(`0x${ACCOUNT.slice(1)}`);
+        },
+      };
+      const config = { registry: REGISTRY, provider };
 
-    await expect(verifyReverse(ACCOUNT, config)).resolves.toBe("alice.qrl");
-  });
+      await expect(verifyReverse(ACCOUNT, config)).resolves.toBe(storedName.toLowerCase());
+    },
+  );
 
   it("rejects legacy-width reverse addresses", async () => {
     const provider: RpcProvider = { request: () => Promise.resolve("0x") };
