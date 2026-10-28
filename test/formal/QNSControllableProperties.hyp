@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+import {Controllable} from "../../contracts/hyperion/vendored/root/Controllable.hyp";
+
+/// @notice Executable SMTChecker properties for Controllable and the in-tree
+///         Ownable, the access control of Root and ReverseRegistrar. Each
+///         property calls the production function internally and asserts over
+///         the resulting state through the production getters.
+///
+///         The pinned SMTChecker does not end a path at `revert CustomError()`,
+///         the form Ownable uses for its owner check. These properties therefore
+///         state effects and frame conditions, which hold on every path the
+///         checker explores. The owner check itself is covered by the
+///         QNSRootControllable semantic suite and the stateful fuzzer.
+contract QNSControllableProperties is Controllable {
+    /// setController writes exactly the named controller and keeps the owner.
+    function proveSetControllerEffect(address controller, address other, bool enabled) public {
+        require(other != controller);
+        address currentOwner = owner();
+        bool otherBefore = controllers(other);
+        setController(controller, enabled);
+        assert(controllers(controller) == enabled);
+        assert(controllers(other) == otherBefore);
+        assert(owner() == currentOwner);
+    }
+
+    /// transferOwnership installs the new owner and leaves controllers alone.
+    function proveTransferOwnershipEffect(address newOwner, address controller) public {
+        bool controllerBefore = controllers(controller);
+        transferOwnership(newOwner);
+        assert(owner() == newOwner);
+        assert(controllers(controller) == controllerBefore);
+    }
+
+    /// renounceOwnership leaves no owner and leaves controllers alone.
+    function proveRenounceEffect(address controller) public {
+        bool controllerBefore = controllers(controller);
+        renounceOwnership();
+        assert(owner() == address(0));
+        assert(controllers(controller) == controllerBefore);
+    }
+}

@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+import {QNSRegistry} from "../../contracts/hyperion/vendored/registry/QNSRegistry.hyp";
+
+/// @notice Executable SMTChecker properties for the QNS registry. Each property
+///         calls the production registry function internally, so the
+///         production modifier and body run with the transaction's msg.sender,
+///         and then asserts over the registry's own storage. The gate checks
+///         them with the BMC engine, which analyses each loop-free function from
+///         an arbitrary storage state; QNSReachability.hyp shows that every
+///         asserted path is reachable. The stateful fuzzer exercises the same
+///         transitions on qrvmone.
+contract QNSRegistryProperties is QNSRegistry {
+    /// A successful setOwner proves the caller was the owner or its operator,
+    /// and stores the new owner.
+    function proveSetOwnerAuthority(bytes32 node, address newOwner) public {
+        address previous = records[node].owner;
+        bool authorised = previous == msg.sender || operators[previous][msg.sender];
+        setOwner(node, newOwner);
+        assert(authorised);
+        assert(records[node].owner == newOwner);
+    }
+
+    /// setOwner leaves every other node's record unchanged.
+    function proveSetOwnerFrame(bytes32 node, bytes32 other, address newOwner) public {
+        require(other != node);
+        address otherOwner = records[other].owner;
+        address otherResolver = records[other].resolver;
+        uint64 otherTtl = records[other].ttl;
+        setOwner(node, newOwner);
+        assert(records[other].owner == otherOwner);
+        assert(records[other].resolver == otherResolver);
+        assert(records[other].ttl == otherTtl);
+    }
+
+    /// A successful setSubnodeOwner proves authority over the parent, writes
+    /// exactly keccak256(parent, label), and leaves the parent record alone.
+    function proveSubnodeAuthority(bytes32 node, bytes32 label, address newOwner) public {
+        address parentOwner = records[node].owner;
+        bool authorised = parentOwner == msg.sender || operators[parentOwner][msg.sender];
+        bytes32 child = keccak256(abi.encodePacked(node, label));
+        require(child != node);
+        bytes32 returned = setSubnodeOwner(node, label, newOwner);
+        assert(authorised);
+        assert(returned == child);
+        assert(records[child].owner == newOwner);
+        assert(records[node].owner == parentOwner);
+    }
+
+    /// setResolver and setTTL need the same authority and never move ownership.
+    function proveResolverAndTtlAuthority(bytes32 node, address newResolver, uint64 newTtl) public {
+        address owner_ = records[node].owner;
+        bool authorised = owner_ == msg.sender || operators[owner_][msg.sender];
+        setResolver(node, newResolver);
+        setTTL(node, newTtl);
+        assert(authorised);
+        assert(records[node].owner == owner_);
+        assert(records[node].resolver == newResolver);
+        assert(records[node].ttl == newTtl);
+    }
+
+    /// A node owned by the registry address is frozen for every caller that
+    /// is neither the registry nor approved by it.
+    function proveRegistryOwnedNodeIsFrozen(bytes32 node, address newOwner) public {
+        require(records[node].owner == address(this));
+        require(msg.sender != address(this));
+        require(!operators[address(this)][msg.sender]);
+        setOwner(node, newOwner);
+        assert(false);
+    }
+
+    /// owner() masks the registry address and recordExists reads the raw owner.
+    /// A deployed contract never has the zero address.
+    function proveOwnerViews(bytes32 node) public view {
+        require(address(this) != address(0));
+        assert(owner(node) != address(this));
+        assert(recordExists(node) == (records[node].owner != address(0)));
+        if (records[node].owner != address(this)) {
+            assert(owner(node) == records[node].owner);
+        }
+    }
+}

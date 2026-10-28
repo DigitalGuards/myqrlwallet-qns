@@ -1,0 +1,175 @@
+{
+  "description": "Reviewed exceptions for npm run lint:contracts. Each entry is bound to a SHA-256 fingerprint of the exact declaration or compiler diagnostic it covers; line and subject are for readers. A new or changed finding fails the gate, and so does an entry that no longer matches. Contract sources are deployed and unchanged; these entries describe existing code.",
+  "source": [
+    {
+      "rule": "visibility",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 14,
+      "subject": "records mapping",
+      "fingerprint": "d73a637329646037f1952af535d9eefca20725b9d62da7f3627ef631d18e6183",
+      "reason": "ENSRegistry declares `mapping(bytes32 => Record) records;` without visibility in ensdomains/ens-contracts 3d477d43 (v1.6.2); Hyperion applies the internal default, so no getter exists and the deployed ABI has no records function. The contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "visibility",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 15,
+      "subject": "operators mapping",
+      "fingerprint": "283f08bffd810410d31e87741259bf424a6538eee963fd2f2b1c2cd8f54bc7eb",
+      "reason": "ENSRegistry declares `mapping(address => mapping(address => bool)) operators;` without visibility in ensdomains/ens-contracts 3d477d43 (v1.6.2); Hyperion applies the internal default and isApprovedForAll is the only reader. The contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "event",
+      "file": "contracts/hyperion/vendored/root/Root.hyp",
+      "line": 39,
+      "subject": "Root.setSubnodeOwner forwards to the registry",
+      "fingerprint": "719d686e197d95a846523519fb7d4e4c18dc38381781514b32aedfaba02c4ace",
+      "reason": "Root forwards to QNSRegistry.setSubnodeOwner on the root node, and the registry emits NewOwner(0x0, label, owner) in the same transaction. The QNSRootControllable semantic suite pins that event, and the stateful fuzzer checks that every successful state change logs."
+    },
+    {
+      "rule": "event",
+      "file": "contracts/hyperion/vendored/root/Root.hyp",
+      "line": 47,
+      "subject": "Root.setResolver forwards to the registry",
+      "fingerprint": "510410311700c8ba352fe95b18f0dc8c173e587b6d7ab6322f8e6dfe241f0fc1",
+      "reason": "Root forwards to QNSRegistry.setResolver on the root node, and the registry emits NewResolver(0x0, resolver) in the same transaction. The QNSRootControllable semantic suite pins that event, and the stateful fuzzer checks that every successful state change logs."
+    }
+  ],
+  "warnings": [
+    {
+      "rule": "3805",
+      "file": "<compiler>",
+      "line": 0,
+      "subject": "pre-release compiler notice",
+      "fingerprint": "c182aa0f6f045d7d6eea1a53a07eb1112641e007cbd0bab6b55bba5eee28bdf3",
+      "reason": "The pinned compiler is the Hyperion develop build 0.2.0-develop.2026.9.21+commit.302c8805, identified by version and SHA-256 in config/hyperion-toolchain.json. Hyperion has no tagged release yet; moving to a stable release is an open item in docs/FORMAL-SECURITY-VERIFICATION.md. The notice describes the release status of the compiler."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 19,
+      "subject": "modifier authorised: local owner",
+      "fingerprint": "b56fd6691c502b0e2819ee9a04fbf899cc7757b75fffc49970ccc5b784642784",
+      "reason": "Modifier authorised declares `address owner`, which shadows the `owner(bytes32)` function (line 126). The modifier reads the raw record owner into the local and never calls the masking getter, which is the intended upstream authorisation check. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 38,
+      "subject": "setRecord: parameter owner",
+      "fingerprint": "2e3ccf62a7465ef52e63781bd928c11f94e1c1e5936b9f2a70e66ee4847a099e",
+      "reason": "setRecord declares `address owner`, which shadows the `owner(bytes32)` function (line 126). The body passes the parameter to setOwner and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 39,
+      "subject": "setRecord: parameter resolver",
+      "fingerprint": "ee15d654c83a07c570b74f41faf24572108c5726323c6179681e3ab4b7a6e92d",
+      "reason": "setRecord declares `address resolver`, which shadows the `resolver(bytes32)` function (line 140). The body passes the parameter to _setResolverAndTTL and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 40,
+      "subject": "setRecord: parameter ttl",
+      "fingerprint": "75907efeb3608526bad5602ccb9c415814a80797ae6240149f21df68fdadf577",
+      "reason": "setRecord declares `uint64 ttl`, which shadows the `ttl(bytes32)` function (line 149). The body passes the parameter to _setResolverAndTTL and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 55,
+      "subject": "setSubnodeRecord: parameter owner",
+      "fingerprint": "f13bba4e1062a90f880d6b4ef4317327964b97c0cfea55d1344d71bf35e10e7a",
+      "reason": "setSubnodeRecord declares `address owner`, which shadows the `owner(bytes32)` function (line 126). The body passes the parameter to setSubnodeOwner and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 56,
+      "subject": "setSubnodeRecord: parameter resolver",
+      "fingerprint": "429de96dfa92a1e56cf36ef2137a859f7a8af0fccf4a6354573a9a4f213d285f",
+      "reason": "setSubnodeRecord declares `address resolver`, which shadows the `resolver(bytes32)` function (line 140). The body passes the parameter to _setResolverAndTTL and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 57,
+      "subject": "setSubnodeRecord: parameter ttl",
+      "fingerprint": "86d261dd595d51ab6fa111283bdbfeb680a0fcc0ca0ceddd8e0f15969372ed26",
+      "reason": "setSubnodeRecord declares `uint64 ttl`, which shadows the `ttl(bytes32)` function (line 149). The body passes the parameter to _setResolverAndTTL and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 68,
+      "subject": "setOwner: parameter owner",
+      "fingerprint": "790cc8f3b527193c6de767bf3c1e026f96758685c41f033281b96fd550c4116f",
+      "reason": "setOwner declares `address owner`, which shadows the `owner(bytes32)` function (line 126). The body stores and emits the parameter and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 81,
+      "subject": "setSubnodeOwner: parameter owner",
+      "fingerprint": "a1187629445f1b0b9af425582f422ef07be69dc3a3a8db0cebb0871f26b2232a",
+      "reason": "setSubnodeOwner declares `address owner`, which shadows the `owner(bytes32)` function (line 126). The body stores and emits the parameter and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 94,
+      "subject": "setResolver: parameter resolver",
+      "fingerprint": "5e990e5f1599464f7e9f2b8d95fc9bc8151096c5d5c07d984f6e89be9ab53462",
+      "reason": "setResolver declares `address resolver`, which shadows the `resolver(bytes32)` function (line 140). The body stores and emits the parameter and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 105,
+      "subject": "setTTL: parameter ttl",
+      "fingerprint": "1ce674009f1b38aff65bceb830845a6fcc4129624ed13e6d21a91e1d68c89b25",
+      "reason": "setTTL declares `uint64 ttl`, which shadows the `ttl(bytes32)` function (line 149). The body stores and emits the parameter and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 167,
+      "subject": "isApprovedForAll: parameter owner",
+      "fingerprint": "40378aaa1f16f51a92b65bc930e0720891ff0e69ece39d08cf9326d1d0da937a",
+      "reason": "isApprovedForAll declares `address owner`, which shadows the `owner(bytes32)` function (line 126). The body indexes the operator mapping with the parameter and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 173,
+      "subject": "_setOwner: parameter owner",
+      "fingerprint": "e6b002982de62eeab44ae8f635bbb7a2b842fc3dcd4aa10f4b22fe51252cd075",
+      "reason": "_setOwner declares `address owner`, which shadows the `owner(bytes32)` function (line 126). The body stores the parameter and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 179,
+      "subject": "_setResolverAndTTL: parameter resolver",
+      "fingerprint": "ba861df4256db2fa4aea6046a611c6963db711770be1f71360c6667b2d78880c",
+      "reason": "_setResolverAndTTL declares `address resolver`, which shadows the `resolver(bytes32)` function (line 140). The body compares the parameter with records[node].resolver directly and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/registry/QNSRegistry.hyp",
+      "line": 180,
+      "subject": "_setResolverAndTTL: parameter ttl",
+      "fingerprint": "6df20b9b5b7f7cc87082cb3e511f66682f88e2b2ae2c3ea7dd3adbf3a4703bd2",
+      "reason": "_setResolverAndTTL declares `uint64 ttl`, which shadows the `ttl(bytes32)` function (line 149). The body compares the parameter with records[node].ttl directly and never calls the getter. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    },
+    {
+      "rule": "2519",
+      "file": "contracts/hyperion/vendored/reverseRegistrar/ReverseRegistrar.hyp",
+      "line": 136,
+      "subject": "setNameForAddr: local node",
+      "fingerprint": "ff12f87ca1b44c16bf568ae14f2ad5874430a2a21406462b0e938cbbfa98f001",
+      "reason": "setNameForAddr declares `bytes32 node`, which shadows the `node(address)` function (line 144). The local holds the node returned by claimForAddr and is passed to the resolver; the pure node(address) helper is not called in this scope. The declaration is unchanged from ensdomains/ens-contracts 3d477d43 (v1.6.2), and the contract is deployed; contract sources stay unchanged in this evidence work."
+    }
+  ]
+}

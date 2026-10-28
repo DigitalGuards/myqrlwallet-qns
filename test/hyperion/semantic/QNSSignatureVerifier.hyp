@@ -1,0 +1,140 @@
+{{QNS_EXTERNAL_SOURCES}}
+==== Source: QNSSignatureVerifier.hyp ====
+import {QRLSignatureVerifier} from "_canonical/crypto/QRLSignatureVerifier.hyp";
+
+// QRLSignatureVerifier with real ML-DSA-87 vectors. scripts/lib/semantic-vectors.js
+// derives the keys and deterministic signatures from fixed seeds with
+// @theqrl/mldsa87 and fills the {{...}} values. The worktree test host verifies
+// every raw slot 3 frame with the same library, so a packing error in the
+// contract or the compiler turns the valid vectors false. The runner repeats
+// this suite with the zero-word failure form.
+contract QNSSignatureVerifierTest {
+    QRLSignatureVerifier internal verifier;
+
+    bytes internal constant MESSAGE = hex"{{MLDSA_MESSAGE}}";
+    bytes internal constant OTHER_MESSAGE = hex"{{MLDSA_OTHER_MESSAGE}}";
+    bytes internal constant DIGEST = hex"{{MLDSA_DIGEST}}";
+    bytes internal constant PUBLIC_KEY = hex"{{MLDSA_PUBLIC_KEY}}";
+    bytes internal constant OTHER_PUBLIC_KEY = hex"{{MLDSA_OTHER_PUBLIC_KEY}}";
+    bytes internal constant SIGNATURE = hex"{{MLDSA_SIGNATURE}}";
+    bytes internal constant SIGNATURE_OTHER_CONTEXT = hex"{{MLDSA_SIGNATURE_OTHER_CONTEXT}}";
+    bytes internal constant SIGNATURE_EMPTY_CONTEXT = hex"{{MLDSA_SIGNATURE_EMPTY_CONTEXT}}";
+    bytes internal constant SIGNATURE_LONG_CONTEXT = hex"{{MLDSA_SIGNATURE_LONG_CONTEXT}}";
+    bytes internal constant SIGNATURE_TAMPERED = hex"{{MLDSA_SIGNATURE_TAMPERED}}";
+    bytes internal constant LONG_CONTEXT = hex"{{MLDSA_LONG_CONTEXT}}";
+
+    constructor() {
+        verifier = new QRLSignatureVerifier();
+    }
+
+    function resized(bytes memory data, uint256 length) internal pure returns (bytes memory out) {
+        out = new bytes(length);
+        for (uint256 i = 0; i < length && i < data.length; i++) out[i] = data[i];
+    }
+
+    // SHAKE256-512 digests
+    function digestMatchesVector() external view returns (bool) {
+        return keccak256(verifier.digest(MESSAGE)) == keccak256(DIGEST);
+    }
+    function digestLength() external view returns (uint256) {
+        return verifier.digest(MESSAGE).length;
+    }
+    function digestOfEmpty() external view returns (bytes memory) {
+        return verifier.digest("");
+    }
+
+    // verify(message, signature, publicKey) hashes with SHAKE256 and binds QNS-SIGN-v1
+    function verifyValid() external view returns (bool) {
+        return verifier.verify(MESSAGE, SIGNATURE, PUBLIC_KEY);
+    }
+    function verifyWrongKey() external view returns (bool) {
+        return verifier.verify(MESSAGE, SIGNATURE, OTHER_PUBLIC_KEY);
+    }
+    function verifyTamperedSignature() external view returns (bool) {
+        return verifier.verify(MESSAGE, SIGNATURE_TAMPERED, PUBLIC_KEY);
+    }
+    function verifyOtherMessage() external view returns (bool) {
+        return verifier.verify(OTHER_MESSAGE, SIGNATURE, PUBLIC_KEY);
+    }
+    function verifyWrongContext() external view returns (bool) {
+        return verifier.verify(MESSAGE, SIGNATURE_OTHER_CONTEXT, PUBLIC_KEY);
+    }
+    function verifyEmptyInputs() external view returns (bool) {
+        return verifier.verify("", "", "");
+    }
+
+    // verifyDigest(digest, signature, publicKey, context)
+    function verifyDigestValid() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE, PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestOtherContext() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE_OTHER_CONTEXT, PUBLIC_KEY, bytes("QNS-SIGN-v2"));
+    }
+    function verifyDigestContextMismatch() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE, PUBLIC_KEY, bytes("QNS-SIGN-v2"));
+    }
+    function verifyDigestEmptyContext() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE_EMPTY_CONTEXT, PUBLIC_KEY, "");
+    }
+    function verifyDigestLongestContext() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE_LONG_CONTEXT, PUBLIC_KEY, LONG_CONTEXT);
+    }
+    function verifyDigestContextTooLong() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE_LONG_CONTEXT, PUBLIC_KEY, resized(LONG_CONTEXT, 256));
+    }
+    function verifyDigestShortDigest() external view returns (bool) {
+        return verifier.verifyDigest(resized(DIGEST, 63), SIGNATURE, PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestLongDigest() external view returns (bool) {
+        return verifier.verifyDigest(resized(DIGEST, 65), SIGNATURE, PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestEmptyDigest() external view returns (bool) {
+        return verifier.verifyDigest("", SIGNATURE, PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestZeroDigest() external view returns (bool) {
+        return verifier.verifyDigest(new bytes(64), SIGNATURE, PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestShortSignature() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, resized(SIGNATURE, 4626), PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestLongSignature() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, resized(SIGNATURE, 4628), PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestShortPublicKey() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE, resized(PUBLIC_KEY, 2591), bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestWrongKey() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE, OTHER_PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+    function verifyDigestTamperedSignature() external view returns (bool) {
+        return verifier.verifyDigest(DIGEST, SIGNATURE_TAMPERED, PUBLIC_KEY, bytes("QNS-SIGN-v1"));
+    }
+}
+// ====
+// compileViaYul: false
+// ----
+// constructor() ->
+// digestMatchesVector() -> true
+// digestLength() -> 64
+// digestOfEmpty() -> 0x40, 64, hex"46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762fd75dc4ddd8c0f200cb05019d67b592f6fc821c49479ab48640292eacb3b7c4be" # SHAKE256-512 of the empty message #
+// verifyValid() -> true
+// verifyWrongKey() -> false
+// verifyTamperedSignature() -> false # one flipped bit #
+// verifyOtherMessage() -> false
+// verifyWrongContext() -> false # signed under QNS-SIGN-v2, verified under QNS-SIGN-v1 #
+// verifyEmptyInputs() -> false
+// verifyDigestValid() -> true
+// verifyDigestOtherContext() -> true # the context is bound into the signed data #
+// verifyDigestContextMismatch() -> false
+// verifyDigestEmptyContext() -> true
+// verifyDigestLongestContext() -> true # 255 context bytes #
+// verifyDigestContextTooLong() -> false # 256 context bytes #
+// verifyDigestShortDigest() -> false # 63 bytes #
+// verifyDigestLongDigest() -> false # 65 bytes #
+// verifyDigestEmptyDigest() -> false
+// verifyDigestZeroDigest() -> false
+// verifyDigestShortSignature() -> false # 4626 bytes #
+// verifyDigestLongSignature() -> false # 4628 bytes #
+// verifyDigestShortPublicKey() -> false # 2591 bytes #
+// verifyDigestWrongKey() -> false
+// verifyDigestTamperedSignature() -> false

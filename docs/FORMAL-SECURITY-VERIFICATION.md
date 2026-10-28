@@ -2,6 +2,8 @@
 
 Status: 36 Hyperion CHC targets proved safe on the aligned tree on 2026-08-26. Six production contracts compiled through the legacy and via-IR paths, deployed to the activated local 64-byte Kurtosis network, and ran through the SDK, cryptographic, lifecycle, and authorization checks. The two formal harness contracts remained off-chain.
 
+Update 2026-10-28: the gate proves 37 CHC and 24 BMC targets and requires nine reachability witnesses. The new targets cover registry authority and frame conditions, Controllable and Ownable effects, and the resolver record version. They complement the hyptest contract suites and the stateful fuzzer described in the README.
+
 ## Scope
 
 The formal harness covers the new QNS security boundaries introduced for QRL 2.0:
@@ -45,7 +47,9 @@ If the Z3 shared library is installed outside the system loader path:
 HYPERION_FORMAL_COMPILER=../hyperion/build-formal/hypc/hypc HYPERION_Z3_LIBRARY_DIR=/path/to/z3/lib npm run verify:formal
 ```
 
-The proof gate is [`scripts/verify-formal.sh`](../scripts/verify-formal.sh). The harnesses are [`QNSSecurityProperties.hyp`](../test/formal/QNSSecurityProperties.hyp) and [`QNSReverseSafetyProperties.hyp`](../test/formal/QNSReverseSafetyProperties.hyp).
+The proof gate is [`scripts/verify-formal.sh`](../scripts/verify-formal.sh). The harnesses are [`QNSSecurityProperties.hyp`](../test/formal/QNSSecurityProperties.hyp), [`QNSReverseSafetyProperties.hyp`](../test/formal/QNSReverseSafetyProperties.hyp), [`QNSRegistryProperties.hyp`](../test/formal/QNSRegistryProperties.hyp), [`QNSControllableProperties.hyp`](../test/formal/QNSControllableProperties.hyp) and [`QNSResolverVersionProperties.hyp`](../test/formal/QNSResolverVersionProperties.hyp), with the reachability witnesses in [`QNSRegistryReachability.hyp`](../test/formal/QNSRegistryReachability.hyp) and [`QNSControllableReachability.hyp`](../test/formal/QNSControllableReachability.hyp).
+
+The registry and Controllable harnesses use the BMC engine with a 60-second per-query solver limit. BMC analyses each function from an arbitrary storage state, which is a stronger premise than reachable states, and these harness functions and the production code they call contain no loops, so no unrolling bound applies. A CHC run of the registry harness did not finish within 14 minutes because it must infer invariants over every inherited registry function; BMC proves the same assertions in under a second. Each BMC property has a reachability witness: the same production path followed by `assert(false)`, which the gate requires the checker to reach, so no property passes because its assertions are unreachable.
 
 ## Proved properties
 
@@ -70,6 +74,33 @@ The CHC engine proved all of these assertions safe:
 Several related assertions and the context index-safety checks share one property group, which yields 26 individual CHC targets.
 
 Production wiring uses the same proved predicates. `setAddr`, `setText`, `setContenthash`, and `clearRecords` flow through `canWrite`. `setName` alone flows through `canSetName`.
+
+### Registry authority and frame conditions: 17 BMC targets
+
+Each property calls the production `QNSRegistry` function internally, so its `authorised` modifier runs with the transaction's sender:
+
+1. A successful `setOwner` implies the caller was the node owner or an operator approved by that owner, and stores the new owner.
+2. `setOwner` leaves the owner, resolver and TTL of every other node unchanged.
+3. A successful `setSubnodeOwner` implies authority over the parent, returns and writes exactly `keccak256(parent, label)`, and leaves the parent record unchanged.
+4. `setResolver` and `setTTL` require the same authority, store the given values, and never change the owner.
+5. A node owned by the registry address is frozen for every caller that is neither the registry nor approved by it.
+6. `owner()` never returns the registry address, returns the raw owner otherwise, and `recordExists` matches a nonzero raw owner.
+
+### Controllable and Ownable effects: 7 BMC targets
+
+1. `setController` writes exactly the named controller and keeps the owner.
+2. `transferOwnership` installs the new owner and leaves controllers unchanged.
+3. `renounceOwnership` leaves no owner and leaves controllers unchanged.
+
+The owner check itself is not among these targets: see the custom-error boundary below.
+
+### Resolver record version: 1 CHC target
+
+A successful `clearRecords(node)` raises that node's record version by exactly one, whatever the external registry owner lookup answers. The run checks assertion targets only, because the version counter uses checked `uint64` arithmetic that reverts after 2^64 clears.
+
+### Reachability witnesses: 9
+
+Six registry witnesses and three Controllable witnesses show that every asserted path of the BMC properties is reachable, including the satisfiable preconditions of the frozen-node property.
 
 ### Reverse-index arithmetic: 10 targets
 
@@ -101,6 +132,12 @@ The production reverse encoder allocates 128 bytes, loops while `i < 64`, and ca
 | Legacy and via-IR compiler lowering | Hyperion semantic tests and six-contract builds through both paths | Passed |
 | Full 128-character reverse encoding | SDK parity tests and live forward, reverse, and forward-confirm flow | Passed |
 | Gas calibration | Five-run local benchmark and fixed gas tests | Provisional pending cross-platform review |
+| Registry authority, operator scoping and frame conditions | BMC proof over production registry functions from arbitrary storage, with reachability witnesses | Proved safe |
+| Controllable and Ownable effects | BMC proof over production functions, with reachability witnesses | Proved safe |
+| Resolver record version increment | CHC proof over production `clearRecords` | Proved safe |
+| Every external function, revert path and authorization matrix of the six contracts | Hyperion semantic suites under four codegen modes | Passed |
+| Real ML-DSA-87 verification through the contract | Semantic suite with keys and signatures from `@theqrl/mldsa87`, verified by the test host | Passed |
+| Stateful behaviour across random operation sequences | Differential fuzzing against a reference model, 600,000 steps | No mismatch |
 
 ## Formal model boundaries
 
@@ -112,7 +149,9 @@ The authorization proof assumes `ens.owner(node)` supplies the registry owner us
 
 The reverse proof establishes universal helper lemmas and their production source composition. Dynamic-memory loop semantics are covered by compiler runtime checks, SDK parity, and live integration evidence.
 
-The migration removed the Foundry toolchain and its 28 Solidity behavior tests: 15 forward-resolution tests and 13 reverse-resolution tests. The new live Hyperion suite restores eight high-value lifecycle and authorization cases covering compatibility aliases, fresh registration, duplicate rejection, owner reassignment, unauthorized subnode and resolver writes, reverse-node parity, and scoped reverse claims. The formal policy proofs cover the trusted-registrar capability that a live account cannot impersonate. Complete one-to-one replacement still needs operator approvals, deeper subnode churn, and the remaining registry transitions before production deployment.
+The pinned SMTChecker does not end a path at `revert CustomError(...)`: both engines report the assertion after such a revert as reachable, while `require` and `revert("...")` behave as expected. Ignoring a revert only adds paths, so the proofs above remain sound, but guards written with custom errors cannot be proved. That covers the Ownable owner check, `NotAuthorised` in the resolver and `NotAvailable` in the FIFS registrar; the semantic suites and the fuzzer cover them. The CHC engine also did not settle, within the gate's per-query budget, that `clearRecords` leaves other nodes' versions unchanged across the external owner lookup; the semantic suite and the fuzzer cover that frame condition.
+
+The migration removed the Foundry toolchain and its 28 Solidity behavior tests: 15 forward-resolution tests and 13 reverse-resolution tests. The new live Hyperion suite restores eight high-value lifecycle and authorization cases covering compatibility aliases, fresh registration, duplicate rejection, owner reassignment, unauthorized subnode and resolver writes, reverse-node parity, and scoped reverse claims. The formal policy proofs cover the trusted-registrar capability that a live account cannot impersonate. Since 2026-10-28 the in-process Hyperion suites cover operator approvals, subnode churn and the remaining registry transitions, and the stateful fuzzer checks random sequences of them.
 
 ## Concrete validation
 
@@ -141,6 +180,6 @@ The local composition used chain ID `3151908`, `qrl2PQPrecompilesTime: 0`, exact
 - Freeze the canonical signed-record encoding and treat any change to `QNS-SIGN-v1` as a protocol-version change.
 - Select a stable Hyperion release and repeat the proof with its supported Z3 version before public deployment.
 - Select the production governance owner, revoke the deployer's temporary Root controller role, and transfer Root plus ReverseRegistrar ownership through a separately reviewed handoff procedure.
-- Complete Hyperion-native lifecycle coverage for the remaining cases from the 28 removed Foundry behavior tests before production deployment.
+- Repeat the live behavior suite on the target network with the lifecycle cases that the in-process suites now cover.
 
 The detailed review artifacts are in [`docs/security-review-2026-08-23-qrl2/`](./security-review-2026-08-23-qrl2/).

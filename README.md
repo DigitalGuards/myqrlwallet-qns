@@ -43,9 +43,15 @@ npm --prefix sdk install
 npm test
 ```
 
-The test command uses the central 64-byte compiler at `../hyperion/build/hypc/hypc`, verifies its exact version and SHA-256 against `config/hyperion-toolchain.json`, compiles every deployable contract through via-IR, executes the Q128 and `bytes32` mapping-accessor regression under default and optimized legacy and via-IR codegen, runs the deployment-script unit tests, type-checks the SDK, and runs its unit tests. `HYPERION_COMPILER` and `HYPC_BIN` may select another path only when that binary has the reviewed identity. `npm run test:behavior` runs the live contract behavior suite against a deployed stack (it skips itself when `QNS_BEHAVIOR=1` is not set).
+The test command uses the central 64-byte compiler at `../hyperion/build/hypc/hypc`, verifies its exact version and SHA-256 against `config/hyperion-toolchain.json`, compiles every deployable contract through via-IR, runs the contract lint gate, executes the Q128 and `bytes32` mapping-accessor regression and the QNS contract suites under default and optimized legacy and via-IR codegen, runs the deployment-script unit tests, type-checks the SDK, and runs its unit tests. `HYPERION_COMPILER` and `HYPC_BIN` may select another path only when that binary has the reviewed identity. `npm run test:behavior` runs the live contract behavior suite against a deployed stack (it skips itself when `QNS_BEHAVIOR=1` is not set).
 
 Worktrees can select the reviewed source tree with `HYPERION_SOURCE_DIR` and the semantic runner and VM with `HYPERION_HYPTEST` and `QRVMONE_LIBRARY`. Compiler version and SHA-256 verification still use the pinned toolchain file.
+
+### Contract evidence gates
+
+- `npm run lint:contracts` compiles every contract with the pinned compiler in all four codegen modes and fails on any compiler warning without a reviewed entry in `config/contract-lint-allowlist.json`. Its source rules forbid `tx.origin`, inline assembly, unchecked low-level call results, implicit visibility and Solidity or Foundry files, require one `pragma hyperion >=0.0;` per file, and require an event on every public state change. Each allowlist entry carries a reason and a fingerprint of the exact code it covers, so new or changed findings fail. `npm run lint:contracts:source` runs the source rules alone; CI runs it.
+- `npm run test:semantic` runs the hyptest suites in `test/hyperion/semantic/`: every external function of the registry, Root, the resolver, the reverse registrar, the FIFS registrar and the signature verifier, their revert data, events and authorization matrices, 64-byte address edge cases, the SDK vectors from `sdk/src/fixtures/qns-vectors.json`, and real ML-DSA-87 vectors. The suites run on a test host built under `build/evidence/` from the pinned hyptest objects: it verifies slot 3 frames with `@theqrl/mldsa87` and drops the logs of reverted frames.
+- `npm run fuzz` checks that the fuzzer catches eight planted model faults, then runs 300 seeded sequences in each codegen mode. `npm run fuzz:long` runs 20,000 sequences of 30 steps on the deployed via-IR build. Both compare every call's status, return data and logs, and 423 observable views after every step, with a JavaScript reference model; a mismatch prints the seed, a replay command and a minimised sequence. `--sequences`, `--length`, `--seed` and `--jobs` (or `QNS_FUZZ_SEQUENCES`, `QNS_FUZZ_LENGTH`, `QNS_FUZZ_SEED`, `QNS_FUZZ_JOBS`) adjust a run.
 
 Build Hyperion with Z3 support and run the reproducible formal security gate with:
 
@@ -53,7 +59,7 @@ Build Hyperion with Z3 support and run the reproducible formal security gate wit
 HYPERION_FORMAL_COMPILER=../hyperion/build-formal/hypc/hypc npm run verify:formal
 ```
 
-The gate currently proves 36 CHC targets covering the cryptographic boundary, exact QNS context bytes, resolver capabilities, unauthorized transitions, and 64-byte reverse-index arithmetic. See [`docs/FORMAL-SECURITY-VERIFICATION.md`](docs/FORMAL-SECURITY-VERIFICATION.md) for the threat model, exact claims, evidence classes, and assumptions.
+The gate currently proves 37 CHC and 24 BMC targets covering the cryptographic boundary, exact QNS context bytes, resolver capabilities, unauthorized transitions, 64-byte reverse-index arithmetic, registry authority and frame conditions, Controllable and Ownable effects, and the resolver record version, and it requires nine reachability witnesses so no BMC property holds vacuously. See [`docs/FORMAL-SECURITY-VERIFICATION.md`](docs/FORMAL-SECURITY-VERIFICATION.md) for the threat model, exact claims, evidence classes, and assumptions.
 
 ## Documentation
 

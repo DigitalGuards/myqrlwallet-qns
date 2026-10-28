@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+import {Controllable} from "../../contracts/hyperion/vendored/root/Controllable.hyp";
+
+/// @notice Anti-vacuity witnesses for QNSControllableProperties.hyp. The gate
+///         requires the model checker to report each assert(false) as reachable.
+contract QNSControllableReachability is Controllable {
+    function reachSetController(address controller, address other, bool enabled) public {
+        require(other != controller);
+        setController(controller, enabled);
+        assert(false);
+    }
+
+    function reachTransferOwnership(address newOwner) public {
+        transferOwnership(newOwner);
+        assert(false);
+    }
+
+    function reachRenounce() public {
+        renounceOwnership();
+        assert(false);
+    }
+}

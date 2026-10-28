@@ -5,6 +5,7 @@
 
 # Hyperion build artifacts
 build/hyperion/
+build/evidence/
 /config/local-qip55.json
 /config/testnet.json
 /config/testnet-v3.json
