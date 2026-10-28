@@ -13,6 +13,7 @@ import {
 import { assertNetwork, requireContract } from "./config.js";
 import { isHexBytes } from "./guards.js";
 import { namehash, nodeToHex } from "./namehash.js";
+import { normalize, QnsNameError } from "./normalize.js";
 import {
   readNameRecords,
   registrationName,
@@ -81,7 +82,15 @@ export async function listOwnedNames(
   };
   const names = new Map<string, string>();
   // Verify the primary's forward record within its candidate so a per-name failure stays local.
-  const primary = await lookupAddress(owner, { registry, provider: snapshot });
+  const reverseName = await lookupAddress(owner, { registry, provider: snapshot });
+  let primary: string | null = null;
+  if (reverseName !== null) {
+    try {
+      primary = normalize(reverseName);
+    } catch (error) {
+      if (!(error instanceof QnsNameError)) throw error;
+    }
+  }
   for (const input of primary ? [...knownNames, primary] : knownNames) {
     try {
       const parsed = registrationName(input);

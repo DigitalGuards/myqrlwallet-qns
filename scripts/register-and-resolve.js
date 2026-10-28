@@ -10,8 +10,6 @@
 const fs = require("fs");
 const path = require("path");
 
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
-
 const { Web3 } = require("@theqrl/web3");
 const { loadDeployerFromEnvironment } = require("./lib/loadDeployer");
 const { assertNetworkIdentity } = require("./lib/networkIdentity");
@@ -19,9 +17,6 @@ const { loadSdk } = require("./lib/sdk");
 const { registrationHashes } = require("./lib/registrationHashes");
 
 const repoRoot = path.join(__dirname, "..");
-const configPath = process.env.QNS_CONFIG
-    ? path.resolve(repoRoot, process.env.QNS_CONFIG)
-    : path.join(repoRoot, "config", "local-qip55.json");
 const artifactsDir = path.join(repoRoot, "build", "hyperion");
 let verifyNetwork;
 
@@ -75,8 +70,14 @@ function makeSdkProvider(web3) {
 }
 
 async function main(options = {}) {
+    const injected = Object.keys(options).length > 0;
+    if (!injected) require("dotenv").config({ path: path.join(repoRoot, ".env") });
+    const env = options.env ?? (injected ? {} : process.env);
+    const configPath = env.QNS_CONFIG
+        ? path.resolve(repoRoot, env.QNS_CONFIG)
+        : path.join(repoRoot, "config", "local-qip55.json");
     const requestedLabel = options.requestedLabel ?? process.argv[2] ?? "alice";
-    const forwardOnlyValue = process.env.QNS_FORWARD_ONLY || "0";
+    const forwardOnlyValue = env.QNS_FORWARD_ONLY || "0";
     if (forwardOnlyValue !== "0" && forwardOnlyValue !== "1") {
         throw new Error("QNS_FORWARD_ONLY must be 0 or 1");
     }
@@ -121,6 +122,7 @@ async function main(options = {}) {
         repoRoot,
         rpcUrl: config.rpcUrl,
         chainId,
+        env,
     });
     console.log(`Caller:     ${account.address}`);
 

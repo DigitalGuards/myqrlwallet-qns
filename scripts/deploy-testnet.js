@@ -306,8 +306,8 @@ async function main() {
     }
     console.log("\nThe deployer owns Root, its controller role, ReverseRegistrar, and the reverse node.");
     console.log(config.handoff?.finalOwner
-        ? "Final-owner config detected. Review npm run handoff -- --dry-run, then run npm run handoff with the same QNS_CONFIG."
-        : "Alpha administration retained. Configure handoff in this deployment record, review npm run handoff -- --dry-run, then run npm run handoff.");
+        ? "Final-owner config detected. Review npm run handoff -- --dry-run, then use its npm run handoff -- --execute <hash> command with the same QNS_CONFIG."
+        : "Alpha administration retained. Configure handoff in this deployment record, review npm run handoff -- --dry-run, then use its npm run handoff -- --execute <hash> command.");
     console.log("Run npm run check:powers with the same QNS_CONFIG after handoff; --report-only reports alpha state.");
 }
 

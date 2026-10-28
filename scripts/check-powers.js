@@ -2,6 +2,7 @@
 const { Web3 } = require("@theqrl/web3");
 const { loadGovernanceConfig } = require("./lib/governance");
 const { checkPowers } = require("./lib/checkPowers");
+const { printError } = require("./lib/errors");
 
 async function main(argv = process.argv.slice(2)) {
     if (argv.some((arg) => arg !== "--report-only")) throw new Error("Usage: check-powers.js [--report-only]");
@@ -12,7 +13,7 @@ async function main(argv = process.argv.slice(2)) {
 }
 
 if (require.main === module) main().catch((error) => {
-    console.error("Power check failed:", error.message);
+    printError("Power check failed:", error);
     process.exitCode = 1;
 });
 

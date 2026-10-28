@@ -3,7 +3,21 @@ const assert = require("node:assert/strict");
 const { Web3 } = require("@theqrl/web3");
 const { loadSdk } = require("../../scripts/lib/sdk");
 const { registrationHashes } = require("../../scripts/lib/registrationHashes");
-const { main } = require("../../scripts/register-and-resolve");
+const { loadCli } = require("./helpers/governanceMock");
+const { main } = loadCli("register-and-resolve.js", {}, {
+    dotenv: { config() { assert.fail("Import loaded dotenv"); } },
+});
+
+test("importing register-and-resolve never reads dotenv or the environment", (t) => {
+    const before = { ...process.env };
+    t.mock.method(require("dotenv"), "config", () => { assert.fail("Import loaded dotenv"); });
+    delete require.cache[require.resolve("../../scripts/register-and-resolve")];
+    require("../../scripts/register-and-resolve");
+    assert.equal(require("node:util").isDeepStrictEqual({ ...process.env }, before), true, "Import changed process.env");
+    loadCli("register-and-resolve.js", {}, {
+        dotenv: { config() { assert.fail("Import loaded dotenv"); } },
+    }, { env: new Proxy({}, { get() { assert.fail("Import read process.env"); } }) });
+});
 
 for (const label of ["0xab", "alice", "0xAB", "ALIce"]) {
     test(`SDK hashes the ASCII characters of ${label} before registration`, async () => {

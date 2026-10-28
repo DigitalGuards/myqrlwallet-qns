@@ -23,6 +23,16 @@ function assessPowers(state, policy) {
     holder("registry.owner(qrl)", state.nodes.qrl, contracts.FIFSQRLRegistrar);
     holder("registry.owner(reverse)", state.nodes.reverse, handoff?.reverseOwner);
     holder("registry.owner(addr.reverse)", state.nodes["addr.reverse"], contracts.ReverseRegistrar);
+    for (const [label, owner] of Object.entries(state.topLevelOwners)) {
+        if (Object.values(policy.labels).includes(label)) continue;
+        const expected = policy.topLevelOwners[label];
+        const enabled = owner !== `Q${"0".repeat(128)}`;
+        const problems = [];
+        if (enabled && expected === undefined) problems.push("UNEXPECTED_TOP_LEVEL");
+        else if (enabled && owner !== expected) problems.push("UNEXPECTED_HOLDER");
+        if (enabled && !state.code[owner]) problems.push("NO_CODE");
+        row(`registry.owner(${label})`, owner, expected, enabled ? (state.code[owner] ? "yes" : "no") : "-", problems);
+    }
     holder("ReverseRegistrar.defaultResolver", state.defaultResolver, contracts.QRLPublicResolver);
     holder("resolver.trustedReverseRegistrar", state.trustedReverseRegistrar, contracts.ReverseRegistrar);
     row("trusted registrar == addr.reverse owner", state.trustedReverseRegistrar === state.nodes["addr.reverse"], true,
@@ -33,7 +43,7 @@ function assessPowers(state, policy) {
             const wanted = expected?.includes(address);
             const problems = [];
             if (enabled && !state.code[address]) problems.push("NO_CODE");
-            if (wanted === undefined) problems.push("MISSING_EXPECTATION");
+            if (enabled && wanted === undefined) problems.push("MISSING_EXPECTATION");
             else if (enabled && !wanted) problems.push("UNEXPECTED_HOLDER");
             else if (!enabled && wanted) problems.push("MISSING_CONTROLLER");
             row(`${name}.controllers(${address})`, enabled, wanted,

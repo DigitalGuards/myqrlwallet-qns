@@ -56,8 +56,8 @@ for (const [power, assign] of authorityCases) {
 for (const name of ["Root", "ReverseRegistrar"]) {
     test(`discovers unexpected ${name} controllers through events and checks their code`, async () => {
         const fixture = await governanceMock({ complete: true });
-        fixture.state.controllers[name][OTHER] = true;
-        fixture.state.controllers[name][DEPLOYER] = true;
+        fixture.setController(name, OTHER, true);
+        fixture.setController(name, DEPLOYER, true);
         const report = await check(fixture);
         assert.equal(report.exitCode, 1);
         assert.ok(has(report, `${name}.controllers(${OTHER})`, "UNEXPECTED_HOLDER"));
@@ -131,7 +131,7 @@ test("explicit list mode probes configured candidates and announces its coverage
     fixture.state.controllers.Root[OTHER] = true;
     const report = await check(fixture);
     assert.ok(has(report, `Root.controllers(${OTHER})`, "UNEXPECTED_HOLDER"));
-    assert.match(report.state.coverage, /unlisted controllers may exist/);
+    assert.match(report.state.coverage, /unlisted controllers and top-level labels may exist/);
     assert.equal(fixture.logQueries.length, 0);
     delete fixture.config.powerCheck.controllerCandidates.ReverseRegistrar;
     await assert.rejects(check(fixture), /explicit address array/);
@@ -139,12 +139,8 @@ test("explicit list mode probes configured candidates and announces its coverage
 
 test("event history discovers revoked controllers but mapping reads determine current power", async () => {
     const fixture = await governanceMock({ complete: true });
-    const getLogs = fixture.getLogs;
-    fixture.getLogs = async (query) => [...await getLogs(query), {
-        address: query.address,
-        topics: [query.topics[0], `0x${fixture.sdk.abi.addressWord(OTHER)}`],
-        data: `0x${fixture.sdk.abi.uintWord(1n)}`,
-    }];
+    fixture.controllerLog("Root", OTHER, true, 3n);
+    fixture.controllerLog("Root", OTHER, false, 4n);
     const report = await check(fixture);
     assert.equal(report.exitCode, 0);
     assert.ok(report.rows.some((row) => row.power === `Root.controllers(${OTHER})` && row.observed === "false"));
