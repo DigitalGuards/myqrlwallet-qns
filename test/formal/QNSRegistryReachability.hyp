@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+import {QNSRegistry} from "../../contracts/hyperion/vendored/registry/QNSRegistry.hyp";
+
+/// @notice Anti-vacuity witnesses for QNSRegistryProperties.hyp. Each function
+///         runs the production path a property asserts after, then asserts
+///         false. The gate requires the model checker to report every one of
+///         these as reachable, so no registry property holds only because its
+///         assertions cannot be reached.
+contract QNSRegistryReachability is QNSRegistry {
+    function reachSetOwner(bytes32 node, address newOwner) public {
+        setOwner(node, newOwner);
+        assert(false);
+    }
+
+    function reachSetOwnerFrame(bytes32 node, bytes32 other, address newOwner) public {
+        require(other != node);
+        setOwner(node, newOwner);
+        assert(false);
+    }
+
+    function reachSetSubnodeOwner(bytes32 node, bytes32 label, address newOwner) public {
+        require(keccak256(abi.encodePacked(node, label)) != node);
+        setSubnodeOwner(node, label, newOwner);
+        assert(false);
+    }
+
+    function reachResolverAndTtl(bytes32 node, address newResolver, uint64 newTtl) public {
+        setResolver(node, newResolver);
+        setTTL(node, newTtl);
+        assert(false);
+    }
+
+    /// The preconditions of proveRegistryOwnedNodeIsFrozen are satisfiable,
+    /// so its proof that setOwner then reverts is not vacuous.
+    function reachFrozenNodePreconditions(bytes32 node) public view {
+        require(records[node].owner == address(this));
+        require(msg.sender != address(this));
+        require(!operators[address(this)][msg.sender]);
+        assert(false);
+    }
+
+    function reachOwnerViews(bytes32 node) public view {
+        require(address(this) != address(0));
+        owner(node);
+        recordExists(node);
+        assert(false);
+    }
+}

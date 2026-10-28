@@ -1,0 +1,289 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+import {QNSRegistry} from "_canonical/vendored/registry/QNSRegistry.hyp";
+import {IQNSRegistry} from "_canonical/vendored/registry/IQNSRegistry.hyp";
+import {Root} from "_canonical/vendored/root/Root.hyp";
+import {Controllable} from "_canonical/vendored/root/Controllable.hyp";
+import {Ownable} from "_canonical/vendored/openzeppelin/access/Ownable.hyp";
+import {ReverseRegistrar} from "_canonical/vendored/reverseRegistrar/ReverseRegistrar.hyp";
+import {FIFSQRLRegistrar} from "_canonical/registry/FIFSQRLRegistrar.hyp";
+import {QRLPublicResolver} from "_canonical/resolvers/QRLPublicResolver.hyp";
+import {ResolverBase} from "_canonical/vendored/resolvers/ResolverBase.hyp";
+
+/// Test-only caller. Forwards a call from its own address and bubbles the
+/// callee's revert data unchanged.
+contract QNSActor {
+    function exec(address target, bytes calldata data) external returns (bytes memory result) {
+        bool ok;
+        (ok, result) = target.call(data);
+        if (!ok) {
+            assembly {
+                revert(add(result, 64), mload(result))
+            }
+        }
+    }
+}
+
+/// Test-only owner for the ReverseRegistrar ownsContract path.
+contract QNSOwnedContract {
+    address public owner;
+
+    constructor(address initialOwner) {
+        owner = initialOwner;
+    }
+}
+
+/// Deploys QNS in the order of scripts/deploy-testnet.js with this harness as
+/// the deployer, so it holds the same roles the deployer account holds on a
+/// network: Root owner and controller, owner of `reverse`, and owner of the
+/// ReverseRegistrar. Actor 0 is the harness itself; actors 1 to 4 are proxy
+/// contracts with distinct addresses. Every write wrapper routes through the
+/// selected actor, so msg.sender at the QNS contract is that actor.
+abstract contract QNSHarness {
+    bytes32 internal constant ROOT_NODE = bytes32(0);
+    bytes32 internal constant QRL_LABEL = keccak256("qrl");
+    bytes32 internal constant REVERSE_LABEL = keccak256("reverse");
+    bytes32 internal constant ADDR_LABEL = keccak256("addr");
+
+    QNSRegistry internal registry;
+    Root internal root;
+    FIFSQRLRegistrar internal fifs;
+    ReverseRegistrar internal reverseRegistrar;
+    QRLPublicResolver internal resolver;
+    QNSActor[5] internal actors;
+    QNSOwnedContract internal ownedContract;
+
+    constructor() {
+        registry = new QNSRegistry();
+        root = new Root(IQNSRegistry(address(registry)));
+        registry.setOwner(ROOT_NODE, address(root));
+        root.setController(address(this), true);
+        bytes32 qrlNode = keccak256(abi.encodePacked(ROOT_NODE, QRL_LABEL));
+        fifs = new FIFSQRLRegistrar(IQNSRegistry(address(registry)), qrlNode);
+        root.setSubnodeOwner(QRL_LABEL, address(fifs));
+        root.setSubnodeOwner(REVERSE_LABEL, address(this));
+        reverseRegistrar = new ReverseRegistrar(IQNSRegistry(address(registry)));
+        bytes32 reverseNode = keccak256(abi.encodePacked(ROOT_NODE, REVERSE_LABEL));
+        registry.setSubnodeOwner(reverseNode, ADDR_LABEL, address(reverseRegistrar));
+        resolver = new QRLPublicResolver(IQNSRegistry(address(registry)), address(reverseRegistrar));
+        reverseRegistrar.setDefaultResolver(address(resolver));
+        for (uint8 i = 1; i < 5; i++) actors[i] = new QNSActor();
+        ownedContract = new QNSOwnedContract(address(actors[1]));
+    }
+
+    function _act(uint8 actorIndex, address target, bytes memory data) internal returns (bytes memory) {
+        if (actorIndex == 0) {
+            (bool ok, bytes memory result) = target.call(data);
+            if (!ok) {
+                assembly {
+                    revert(add(result, 64), mload(result))
+                }
+            }
+            return result;
+        }
+        return actors[actorIndex].exec(target, data);
+    }
+
+    // ---- identities ----
+    function actor(uint8 index) external view returns (address) {
+        return index == 0 ? address(this) : address(actors[index]);
+    }
+    function contracts() external view returns (address, address, address, address, address) {
+        return (address(registry), address(root), address(fifs), address(reverseRegistrar), address(resolver));
+    }
+    function owned() external view returns (address) {
+        return address(ownedContract);
+    }
+    function subnode(bytes32 parent, bytes32 label) external pure returns (bytes32) {
+        return keccak256(abi.encodePacked(parent, label));
+    }
+    function labelhash(string memory label) external pure returns (bytes32) {
+        return keccak256(bytes(label));
+    }
+
+    // ---- QNSRegistry ----
+    function registrySetRecord(uint8 a, bytes32 node, address owner_, address resolver_, uint64 ttl_) external {
+        _act(a, address(registry), abi.encodeCall(QNSRegistry.setRecord, (node, owner_, resolver_, ttl_)));
+    }
+    function registrySetSubnodeRecord(uint8 a, bytes32 node, bytes32 label, address owner_, address resolver_, uint64 ttl_) external {
+        _act(a, address(registry), abi.encodeCall(QNSRegistry.setSubnodeRecord, (node, label, owner_, resolver_, ttl_)));
+    }
+    function registrySetOwner(uint8 a, bytes32 node, address owner_) external {
+        _act(a, address(registry), abi.encodeCall(QNSRegistry.setOwner, (node, owner_)));
+    }
+    function registrySetSubnodeOwner(uint8 a, bytes32 node, bytes32 label, address owner_) external returns (bytes32) {
+        return abi.decode(
+            _act(a, address(registry), abi.encodeCall(QNSRegistry.setSubnodeOwner, (node, label, owner_))),
+            (bytes32)
+        );
+    }
+    function registrySetResolver(uint8 a, bytes32 node, address resolver_) external {
+        _act(a, address(registry), abi.encodeCall(QNSRegistry.setResolver, (node, resolver_)));
+    }
+    function registrySetTTL(uint8 a, bytes32 node, uint64 ttl_) external {
+        _act(a, address(registry), abi.encodeCall(QNSRegistry.setTTL, (node, ttl_)));
+    }
+    function registrySetApprovalForAll(uint8 a, address operator, bool approved) external {
+        _act(a, address(registry), abi.encodeCall(QNSRegistry.setApprovalForAll, (operator, approved)));
+    }
+    function registryOwner(bytes32 node) external view returns (address) {
+        return registry.owner(node);
+    }
+    function registryResolver(bytes32 node) external view returns (address) {
+        return registry.resolver(node);
+    }
+    function registryTTL(bytes32 node) external view returns (uint64) {
+        return registry.ttl(node);
+    }
+    function registryRecordExists(bytes32 node) external view returns (bool) {
+        return registry.recordExists(node);
+    }
+    function registryIsApprovedForAll(address owner_, address operator) external view returns (bool) {
+        return registry.isApprovedForAll(owner_, operator);
+    }
+
+    // ---- Root, Controllable, Ownable ----
+    function rootSetSubnodeOwner(uint8 a, bytes32 label, address owner_) external {
+        _act(a, address(root), abi.encodeCall(Root.setSubnodeOwner, (label, owner_)));
+    }
+    function rootSetResolver(uint8 a, address resolver_) external {
+        _act(a, address(root), abi.encodeCall(Root.setResolver, (resolver_)));
+    }
+    function rootLock(uint8 a, bytes32 label) external {
+        _act(a, address(root), abi.encodeCall(Root.lock, (label)));
+    }
+    function rootSetController(uint8 a, address controller, bool enabled) external {
+        _act(a, address(root), abi.encodeCall(Controllable.setController, (controller, enabled)));
+    }
+    function rootTransferOwnership(uint8 a, address newOwner) external {
+        _act(a, address(root), abi.encodeCall(Ownable.transferOwnership, (newOwner)));
+    }
+    function rootRenounceOwnership(uint8 a) external {
+        _act(a, address(root), abi.encodeCall(Ownable.renounceOwnership, ()));
+    }
+    function rootOwner() external view returns (address) {
+        return root.owner();
+    }
+    function rootControllers(address controller) external view returns (bool) {
+        return root.controllers(controller);
+    }
+    function rootLocked(bytes32 label) external view returns (bool) {
+        return root.locked(label);
+    }
+    function rootRegistries() external view returns (address, address) {
+        return (address(root.qns()), address(root.ens()));
+    }
+    function rootSupportsInterface(bytes4 interfaceID) external view returns (bool) {
+        return root.supportsInterface(interfaceID);
+    }
+
+    // ---- ReverseRegistrar ----
+    function rrSetDefaultResolver(uint8 a, address resolver_) external {
+        _act(a, address(reverseRegistrar), abi.encodeCall(ReverseRegistrar.setDefaultResolver, (resolver_)));
+    }
+    function rrClaim(uint8 a, address owner_) external returns (bytes32) {
+        return abi.decode(_act(a, address(reverseRegistrar), abi.encodeCall(ReverseRegistrar.claim, (owner_))), (bytes32));
+    }
+    function rrClaimForAddr(uint8 a, address addr, address owner_, address resolver_) external returns (bytes32) {
+        return abi.decode(
+            _act(a, address(reverseRegistrar), abi.encodeCall(ReverseRegistrar.claimForAddr, (addr, owner_, resolver_))),
+            (bytes32)
+        );
+    }
+    function rrClaimWithResolver(uint8 a, address owner_, address resolver_) external returns (bytes32) {
+        return abi.decode(
+            _act(a, address(reverseRegistrar), abi.encodeCall(ReverseRegistrar.claimWithResolver, (owner_, resolver_))),
+            (bytes32)
+        );
+    }
+    function rrSetName(uint8 a, string memory name_) external returns (bytes32) {
+        return abi.decode(_act(a, address(reverseRegistrar), abi.encodeCall(ReverseRegistrar.setName, (name_))), (bytes32));
+    }
+    function rrSetNameForAddr(uint8 a, address addr, address owner_, address resolver_, string memory name_) external returns (bytes32) {
+        return abi.decode(
+            _act(
+                a,
+                address(reverseRegistrar),
+                abi.encodeCall(ReverseRegistrar.setNameForAddr, (addr, owner_, resolver_, name_))
+            ),
+            (bytes32)
+        );
+    }
+    function rrSetController(uint8 a, address controller, bool enabled) external {
+        _act(a, address(reverseRegistrar), abi.encodeCall(Controllable.setController, (controller, enabled)));
+    }
+    function rrTransferOwnership(uint8 a, address newOwner) external {
+        _act(a, address(reverseRegistrar), abi.encodeCall(Ownable.transferOwnership, (newOwner)));
+    }
+    function rrRenounceOwnership(uint8 a) external {
+        _act(a, address(reverseRegistrar), abi.encodeCall(Ownable.renounceOwnership, ()));
+    }
+    function rrNode(address addr) external view returns (bytes32) {
+        return reverseRegistrar.node(addr);
+    }
+    function rrDefaultResolver() external view returns (address) {
+        return address(reverseRegistrar.defaultResolver());
+    }
+    function rrOwner() external view returns (address) {
+        return reverseRegistrar.owner();
+    }
+    function rrControllers(address controller) external view returns (bool) {
+        return reverseRegistrar.controllers(controller);
+    }
+    function rrRegistries() external view returns (address, address) {
+        return (address(reverseRegistrar.qns()), address(reverseRegistrar.ens()));
+    }
+
+    // ---- FIFSQRLRegistrar ----
+    function fifsRegister(uint8 a, bytes32 label, address owner_) external {
+        _act(a, address(fifs), abi.encodeCall(FIFSQRLRegistrar.register, (label, owner_)));
+    }
+    function fifsAvailable(bytes32 label) external view returns (bool) {
+        return fifs.available(label);
+    }
+    function fifsBaseNode() external view returns (bytes32) {
+        return fifs.baseNode();
+    }
+    function fifsRegistries() external view returns (address, address) {
+        return (address(fifs.qns()), address(fifs.ens()));
+    }
+
+    // ---- QRLPublicResolver ----
+    function resolverSetAddr(uint8 a, bytes32 node, address value) external {
+        _act(a, address(resolver), abi.encodeCall(QRLPublicResolver.setAddr, (node, value)));
+    }
+    function resolverSetText(uint8 a, bytes32 node, string memory key, string memory value) external {
+        _act(a, address(resolver), abi.encodeCall(QRLPublicResolver.setText, (node, key, value)));
+    }
+    function resolverSetContenthash(uint8 a, bytes32 node, bytes memory hash) external {
+        _act(a, address(resolver), abi.encodeCall(QRLPublicResolver.setContenthash, (node, hash)));
+    }
+    function resolverSetName(uint8 a, bytes32 node, string memory name_) external {
+        _act(a, address(resolver), abi.encodeCall(QRLPublicResolver.setName, (node, name_)));
+    }
+    function resolverClearRecords(uint8 a, bytes32 node) external {
+        _act(a, address(resolver), abi.encodeCall(ResolverBase.clearRecords, (node)));
+    }
+    function resolverAddr(bytes32 node) external view returns (address) {
+        return resolver.addr(node);
+    }
+    function resolverText(bytes32 node, string memory key) external view returns (string memory) {
+        return resolver.text(node, key);
+    }
+    function resolverContenthash(bytes32 node) external view returns (bytes memory) {
+        return resolver.contenthash(node);
+    }
+    function resolverName(bytes32 node) external view returns (string memory) {
+        return resolver.name(node);
+    }
+    function resolverRecordVersions(bytes32 node) external view returns (uint64) {
+        return resolver.recordVersions(node);
+    }
+    function resolverSupportsInterface(bytes4 interfaceID) external view returns (bool) {
+        return resolver.supportsInterface(interfaceID);
+    }
+    function resolverWiring() external view returns (address, address, address) {
+        return (address(resolver.qns()), address(resolver.ens()), resolver.trustedReverseRegistrar());
+    }
+}

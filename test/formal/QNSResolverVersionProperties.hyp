@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma hyperion >=0.0;
+
+import {IQNSRegistry} from "../../contracts/hyperion/vendored/registry/IQNSRegistry.hyp";
+import {QRLPublicResolver} from "../../contracts/hyperion/resolvers/QRLPublicResolver.hyp";
+
+/// @notice Executable SMTChecker property for the resolver's record versions:
+///         a successful clearRecords raises the node's version by exactly one,
+///         whatever the external registry owner lookup answers. The CHC engine
+///         proves it; the matching frame condition for other nodes is left to
+///         the semantic suite and the stateful fuzzer, because the solver does
+///         not settle it across the external lookup within the gate's budget.
+contract QNSResolverVersionProperties is QRLPublicResolver {
+    constructor() QRLPublicResolver(IQNSRegistry(address(0x51)), address(0)) {}
+
+    function proveClearRecordsBumpsVersion(bytes32 node) public {
+        uint64 before = recordVersions(node);
+        clearRecords(node);
+        assert(recordVersions(node) == before + 1);
+    }
+}
