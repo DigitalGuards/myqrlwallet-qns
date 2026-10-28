@@ -21,12 +21,14 @@ const config = {
 };
 
 const address = await resolveName("alice.qrl", config);
-const name = address ? await lookupAddress(address, config) : null;
+const unverifiedName = address ? await lookupAddress(address, config) : null;
 const verifiedName = address ? await verifyReverse(address, config) : null;
 const digest = qnsDigest(new TextEncoder().encode("record payload"));
 ```
 
 Any provider implementing `request({ method, params })` can be used. QNS sends reads through the QRL `qrl_call` method.
+
+`lookupAddress()` returns an unverified, attacker-controlled reverse string and is unsafe for identity display. Use `verifyReverse()` for display: it returns the normalized name whose forward record matches the supplied address, or `null` when confirmation fails. For example, a stored `ALIce.QRL` returns `alice.qrl` after successful verification.
 
 ## ML-DSA helpers
 

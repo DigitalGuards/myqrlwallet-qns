@@ -32,6 +32,9 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Install SDK for script hashing and ABI tests
+        run: npm --prefix sdk ci
+
       - name: Script tests
         run: npm run test:scripts
 

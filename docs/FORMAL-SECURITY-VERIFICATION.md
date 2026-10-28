@@ -179,7 +179,7 @@ The local composition used chain ID `3151908`, `qrl2PQPrecompilesTime: 0`, exact
 - Define the public-key-to-QRL-identity binding before signatures authorize QNS record writes.
 - Freeze the canonical signed-record encoding and treat any change to `QNS-SIGN-v1` as a protocol-version change.
 - Select a stable Hyperion release and repeat the proof with its supported Z3 version before public deployment.
-- Select the production governance owner, revoke the deployer's temporary Root controller role, and transfer Root plus ReverseRegistrar ownership through a separately reviewed handoff procedure.
+- Select the production governance owner and review the [ordered handoff](DEPLOYMENT-GOVERNANCE.md): add reviewed Root controllers, assign the `reverse` registry node to its final owner, optionally lock `qrl` and `reverse` after owner checks, revoke deployer controller roles, then transfer Root and ReverseRegistrar ownership. The handoff and read-only power check have mocked-provider unit coverage; they add no formal proof targets or live deployment evidence.
 - Repeat the live behavior suite on the target network with the lifecycle cases that the in-process suites now cover.
 
 The detailed review artifacts are in [`docs/security-review-2026-08-23-qrl2/`](./security-review-2026-08-23-qrl2/).

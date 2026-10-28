@@ -74,7 +74,9 @@ The start path previously rebuilt only missing images and accepted any existing 
 
 Severity: Low design risk. Status: Open before production.
 
-After `deploy-testnet.js`, the deployer remains the owner of `Root`, a Root controller, and the owner of `ReverseRegistrar`. This is explicit alpha administration and allows later wiring changes. Production deployment needs a reviewed destination owner, controller revocation, ownership transfers, and post-handoff verification. Renunciation is irreversible and is not automated without an agreed governance target.
+After `deploy-testnet.js`, the deployer owns `Root`, is a Root controller, owns `ReverseRegistrar`, and directly owns `reverse` in the registry. Root owns the root node, FIFSQRLRegistrar owns `qrl`, and ReverseRegistrar owns `addr.reverse`; neither top-level label is locked. ReverseRegistrar starts with no controllers. Ownership transfers and renunciation preserve controller roles.
+
+The [governance checklist](../DEPLOYMENT-GOVERNANCE.md) adds reviewed Root controllers, assigns `reverse` to its configured final owner, optionally locks `qrl` and `reverse` after owner checks, revokes deployer controller roles, then transfers Root and ReverseRegistrar ownership. Locking `reverse` while the deployer owns it permanently prevents Root from reassigning it. The script supports dry-run and recovery from partial completion, and the read-only power check reports all direct owners, controllers, locks and reverse-registrar trust. Governance selection and target-network execution remain open before production; these script tests use mocked providers.
 
 ## QRL2-009: Hyperion migration removed registry lifecycle unit coverage
 

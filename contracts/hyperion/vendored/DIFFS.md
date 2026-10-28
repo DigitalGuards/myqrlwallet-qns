@@ -22,11 +22,11 @@ The in-tree `openzeppelin/access/Ownable.hyp` follows the OpenZeppelin v5 shape:
 
 The upstream public mappings `Controllable.controllers`, `Root.locked`, and `ResolverBase.recordVersions` use private backing mappings plus explicit typed getters. Their external names, parameter types, return types, selectors, and storage slots remain unchanged.
 
-This source-level divergence preserves complete native 64-byte `address` and left-aligned `bytes32` mapping keys. Legacy Hyperion generated mapping getters clean these keys through a 256-bit path on the 512-bit QRVM. `ReverseRegistrar` calls `controllers(msg.sender)`, and `QRLPublicResolver` calls `recordVersions(node)` to use the explicit accessors internally. Native semantic regressions exercise paired alias-shaped keys under default and optimized legacy and via-IR codegen.
+This source-level divergence preserves complete native 64-byte `address` and left-aligned `bytes32` mapping keys. Legacy Hyperion generated mapping getters clean these keys through a 256-bit path on the 512-bit QRVM. `ReverseRegistrar` calls `controllers(msg.sender)`, and `QRLPublicResolver` calls `recordVersions(node)` to use the explicit accessors internally. The `QNSExplicitMappingAccessors.hyp` regression exercises paired alias-shaped keys in `Controllable._controllers` through `controllers(address)`, `Root._locked` through `locked(bytes32)`, and `ResolverBase._recordVersions` through `recordVersions(bytes32)`, under default and optimized legacy and via-IR codegen. It checks independent controller enablement, label locks and per-node version increments. The registry records, registry operator approvals and resolver record-value mappings receive separate lifecycle suite coverage.
 
 ## Registry
 
-`registry/ENSRegistry.hyp` omits the deprecated `public` constructor visibility. All authorization, event ordering, approval, and record semantics match upstream byte for byte.
+`registry/QNSRegistry.hyp` omits the deprecated `public` constructor visibility. All authorization, event ordering, approval, and record semantics match upstream byte for byte.
 
 ## QRL 2.0 reverse labels
 
@@ -37,6 +37,8 @@ This source-level divergence preserves complete native 64-byte `address` and lef
 
 ## Resolver (custom `resolvers/QRLPublicResolver.hyp`, upstream-derived semantics)
 
+- Upstream `PublicResolver`'s `trustedETHController` constructor parameter, immutable field and privileged authorization path are removed. The QNS resolver has no trusted registration-controller bypass.
+- The trusted reverse registrar is retained as the immutable `trustedReverseRegistrar`, with its authorization narrowed to `setName` only. `setAddr`, `setText`, `setContenthash` and `clearRecords` require node-owner authority; the registrar's trust grants access only to the name setter.
 - Authorization is narrowed to strict name-owner-only writes (`resolvers/QRLResolverAuthorization.hyp`): upstream `PublicResolver`'s operator approvals (`setApprovalForAll`) and per-name delegates (`approve`) are removed, and `ENSRegistry.isApprovedForAll` is not consulted. Note the asymmetry: `ReverseRegistrar` still honors registry operator approvals for reverse claims. Whether resolver writes should honor registry operator approvals is an open design decision.
 - `addr(bytes32)` returns the native 64-byte address in one 64-byte ABI word. The upstream multichain profile (`IAddressResolver`, `addr(node,coinType)`, the `AddressChanged` event, `versionable_addresses`) is omitted; `setAddr` emits `AddrChanged` only. Event-sourced indexers built on the upstream schema must key on `AddrChanged`.
 - `supportsInterface` still advertises the upstream ENS interface IDs (`IAddrResolver` 0x3b3b57de and peers) although the `addr` payload is 64 bytes wide. On QRVM every ABI word is 64 bytes, so native clients are unaffected; tooling ported from 32-byte chains must not decode these replies with the Ethereum ABI. Minting QRL-specific interface IDs is an open design decision.

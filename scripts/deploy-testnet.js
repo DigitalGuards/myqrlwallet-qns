@@ -304,6 +304,11 @@ async function main() {
     for (const [name, addr] of Object.entries(config.contracts)) {
         console.log(`  ${name.padEnd(22)} ${addr}`);
     }
+    console.log("\nThe deployer owns Root, its controller role, ReverseRegistrar, and the reverse node.");
+    console.log(config.handoff?.finalOwner
+        ? "Final-owner config detected. Review npm run handoff -- --dry-run, then run npm run handoff with the same QNS_CONFIG."
+        : "Alpha administration retained. Configure handoff in this deployment record, review npm run handoff -- --dry-run, then run npm run handoff.");
+    console.log("Run npm run check:powers with the same QNS_CONFIG after handoff; --report-only reports alpha state.");
 }
 
 if (require.main === module) {

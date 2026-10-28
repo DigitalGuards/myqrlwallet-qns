@@ -9,20 +9,20 @@
 
 const fs = require("fs");
 const path = require("path");
-const { pathToFileURL } = require("url");
 
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { Web3 } = require("@theqrl/web3");
 const { loadDeployerFromEnvironment } = require("./lib/loadDeployer");
 const { assertNetworkIdentity } = require("./lib/networkIdentity");
+const { loadSdk } = require("./lib/sdk");
+const { registrationHashes } = require("./lib/registrationHashes");
 
 const repoRoot = path.join(__dirname, "..");
 const configPath = process.env.QNS_CONFIG
     ? path.resolve(repoRoot, process.env.QNS_CONFIG)
     : path.join(repoRoot, "config", "local-qip55.json");
 const artifactsDir = path.join(repoRoot, "build", "hyperion");
-const sdkDistDir = path.join(repoRoot, "sdk", "dist");
 let verifyNetwork;
 
 function loadJson(p) {
@@ -34,7 +34,7 @@ function loadAbi(contractName) {
 }
 
 // QRL web3 contracts constructed via `new web3.qrl.Contract(abi, addr)` do not
-// inherit the wallet. Use encodeABI + qrl.sendTransaction instead (the
+// inherit the wallet. Use encodeABI + qrl.sendTransaction (the
 // QuantaPool deployment pattern, GPL-3.0).
 async function sendTx(web3, contract, method, account, label) {
     const data = method.encodeABI();
@@ -74,8 +74,8 @@ function makeSdkProvider(web3) {
     };
 }
 
-async function main() {
-    const requestedLabel = process.argv[2] || "alice";
+async function main(options = {}) {
+    const requestedLabel = options.requestedLabel ?? process.argv[2] ?? "alice";
     const forwardOnlyValue = process.env.QNS_FORWARD_ONLY || "0";
     if (forwardOnlyValue !== "0" && forwardOnlyValue !== "1") {
         throw new Error("QNS_FORWARD_ONLY must be 0 or 1");
@@ -84,18 +84,10 @@ async function main() {
 
     // Load and apply the same normalization implementation used by SDK reads
     // before deriving a labelhash or submitting any transaction.
-    const sdk = await import(pathToFileURL(path.join(sdkDistDir, "index.js")).href);
-
-    const config = loadJson(configPath);
-    const nameLabel = sdk.normalize(requestedLabel);
-    const tld = sdk.normalize(config.tld);
-    if (nameLabel.includes(".")) {
-        throw new Error(`registration label must contain one label, got "${requestedLabel}"`);
-    }
-    if (tld.includes(".")) {
-        throw new Error(`configured TLD must contain one label, got "${config.tld}"`);
-    }
-    const fullName = sdk.normalize(`${nameLabel}.${tld}`);
+    const sdk = options.sdk ?? await loadSdk();
+    const config = options.config ?? loadJson(configPath);
+    const web3 = options.web3 ?? new Web3(config.rpcUrl);
+    const { nameLabel, fullName, labelHash, node } = registrationHashes(requestedLabel, config.tld, sdk, web3);
 
     const registryAddress = config.contracts?.QNSRegistry;
     if (!registryAddress) {
@@ -120,13 +112,12 @@ async function main() {
     console.log(`Resolver:   ${config.contracts.QRLPublicResolver}`);
     console.log(`FIFS:       ${config.contracts.FIFSQRLRegistrar}`);
 
-    const web3 = new Web3(config.rpcUrl);
     verifyNetwork = () => assertNetworkIdentity(web3, config);
     const chainId = await verifyNetwork();
     if (Number(chainId) !== config.chainId) {
         throw new Error(`chainId mismatch: expected ${config.chainId}, got ${chainId}`);
     }
-    const account = loadDeployerFromEnvironment(web3, {
+    const account = (options.loadAccount ?? loadDeployerFromEnvironment)(web3, {
         repoRoot,
         rpcUrl: config.rpcUrl,
         chainId,
@@ -152,15 +143,6 @@ async function main() {
           )
         : null;
 
-    // namehash via concatenated-bytes32 keccak256 (EIP-137)
-    const ROOT = "0x" + "00".repeat(32);
-    const labelHash = web3.utils.keccak256(nameLabel);
-    const tldNode = web3.utils.keccak256(
-        ROOT + web3.utils.keccak256(tld).slice(2)
-    );
-    const node = web3.utils.keccak256(
-        tldNode + labelHash.slice(2)
-    );
     console.log(`\nlabelhash(${nameLabel}) = ${labelHash}`);
     console.log(`namehash(${fullName}) = ${node}`);
 
@@ -254,13 +236,6 @@ async function main() {
     const provider = makeSdkProvider(web3);
     const cfg = { registry: registryAddress, provider };
 
-    const sdkNode = sdk.nodeToHex(sdk.namehash(fullName));
-    console.log(`  SDK namehash:    ${sdkNode}`);
-    console.log(`  Local namehash:  ${node}`);
-    if (sdkNode.toLowerCase() !== node.toLowerCase()) {
-        throw new Error("SDK and web3 namehash disagree");
-    }
-
     const resolverFromSdk = await sdk.getResolver(fullName, cfg);
     console.log(`  SDK getResolver: ${resolverFromSdk}`);
 
@@ -308,8 +283,10 @@ async function main() {
     console.log("=".repeat(60));
 }
 
-main().catch((err) => {
+if (require.main === module) main().catch((err) => {
     console.error("\nIntegration test failed:", err.message);
     if (err.data) console.error("Data:", err.data);
     process.exit(1);
 });
+
+module.exports = { main };
