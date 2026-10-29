@@ -1,5 +1,5 @@
 {
-  "description": "Reviewed exceptions for npm run lint:contracts. Each entry is bound to a SHA-256 fingerprint of the exact declaration or compiler diagnostic it covers; line and subject are for readers. A new or changed finding fails the gate, and so does an entry that no longer matches. Contract sources are deployed and unchanged; these entries describe existing code.",
+  "description": "Reviewed exceptions for npm run lint:contracts. Each entry is bound to a SHA-256 fingerprint of the exact declaration or compiler diagnostic it covers; line and subject are for readers. A new or changed finding fails the gate, and so does an entry that no longer matches. These entries describe reviewed existing code. The six source rules for known compiler bugs cannot be allowlisted.",
   "source": [
     {
       "rule": "visibility",

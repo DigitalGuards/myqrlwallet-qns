@@ -22,7 +22,8 @@ contract QRLSignatureVerifier {
         if (messageDigest.length != 64) {
             return false;
         }
-        return mldsa87verify(bytes64(messageDigest), signature, publicKey, context);
+        bytes64 digestValue = bytes64(messageDigest);
+        return mldsa87verify(digestValue, signature, publicKey, context);
     }
 
     function verify(
@@ -30,11 +31,8 @@ contract QRLSignatureVerifier {
         bytes memory signature,
         bytes memory publicKey
     ) public pure returns (bool) {
-        return mldsa87verify(
-            shake256(message),
-            signature,
-            publicKey,
-            qnsContext()
-        );
+        bytes64 digestValue = shake256(message);
+        bytes memory context = qnsContext();
+        return mldsa87verify(digestValue, signature, publicKey, context);
     }
 }
