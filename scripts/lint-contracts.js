@@ -8,6 +8,12 @@
 //   assembly         no inline assembly
 //   low-level-call   every call, delegatecall, staticcall or send result is checked
 //   visibility       explicit visibility on state variables and functions
+//   verifier-arguments        plain value/memory locals for both PQ verifiers
+//   delete-memory-bytes       no indexed delete on bytes in memory
+//   storage-internal-function no stored internal function types
+//   depositroot-storage       materialize storage arguments before depositroot
+//   stale-returndatasize       no assembly size snapshot across a later call
+//   unchecked-constant        evaluate non-literal constants in checked code
 //   event            every public or external state-changing function emits an
 //                    event itself or through a helper in the same contract
 // Compiler rule (pinned hypc, four codegen modes): no warning outside the
@@ -18,6 +24,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
+const { KNOWN_BUG_RULES, knownBugFindings } = require("./lib/contractKnownBugs");
 
 const root = path.resolve(__dirname, "..");
 const ALLOWLIST_PATH = path.join(root, "config", "contract-lint-allowlist.json");
@@ -151,7 +158,11 @@ function uncheckedLowLevelCalls(body) {
 }
 
 function sourceFindings(sources) {
-    const findings = [];
+    const findings = knownBugFindings(sources).map(({ at, text, ...finding }) => ({
+        ...finding,
+        line: sources[finding.file].content.slice(0, at).split("\n").length,
+        fingerprint: hash(text),
+    }));
     for (const [file, { content }] of Object.entries(sources)) {
         const { clean, functions, variables } = declarations(content);
         const add = (rule, at, text, detail) =>
@@ -210,6 +221,9 @@ function sourceFindings(sources) {
 }
 
 function checkAllowlist(findings, allowances, label, log = console.log) {
+    for (const entry of allowances) {
+        if (KNOWN_BUG_RULES.has(entry.rule)) throw new Error(`Rule ${entry.rule} cannot be allowlisted`);
+    }
     const used = new Set();
     const unmatched = findings.filter((finding) => {
         const index = allowances.findIndex(
@@ -325,6 +339,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+    KNOWN_BUG_RULES,
     PRAGMA,
     checkAllowlist,
     compileMode,
