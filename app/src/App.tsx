@@ -86,7 +86,9 @@ function ownedNameStatus(name: OwnedName, account: string | null, config: Networ
   // The registrar stores only the label hash, so a name registered without its name record
   // has no readable spelling and every other check depends on knowing it.
   if (name.name === null)
-    return "Registered without saving its name text, so this page cannot show it";
+    return name.records.spelling
+      ? "Its saved name text does not match this name, so this page cannot show it"
+      : "Registered without saving its name text, so this page cannot show it";
   if (name.records.resolverStatus === "unusable") return "Resolver not usable";
   if (!name.records.address) return "Address record missing";
   if (name.records.address !== account) return "Address record needs updating";
