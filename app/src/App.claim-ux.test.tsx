@@ -403,6 +403,46 @@ describe("My names actions", () => {
     },
   );
 
+  it("explains an owned name whose spelling is unknown as one situation", async () => {
+    const chain = new MockChain();
+    const parsed = seedRecords(chain, "qa1789998197");
+    // The release test registered this label without a name record and left no hint.
+    chain.spellings.delete(parsed.node);
+    await mount(chain);
+    const names = within(screen.getByRole("region", { name: "My names" }));
+    await names.findByText("Unknown name");
+    expect(
+      names.getByText("Registered without saving its name text, so this page cannot show it"),
+    ).toBeDefined();
+    expect(names.getByText(parsed.node)).toBeDefined();
+    expect(
+      names.getByText("If you know the name, search it above to finish its setup."),
+    ).toBeDefined();
+    expect(names.queryByText("Name text missing")).toBeNull();
+    expect(names.queryByText("Spelling unavailable")).toBeNull();
+    expect(names.queryByText("Not set as primary")).toBeNull();
+    expect(names.queryByText("Primary name")).toBeNull();
+    expect(names.queryByRole("button", { name: /Finish name setup|Make primary name/ })).toBeNull();
+    expect(chain.sent).toHaveLength(0);
+  });
+
+  it("keeps the missing name text state for a known spelling without its name record", async () => {
+    const chain = new MockChain();
+    const parsed = seedRecords(chain, "external");
+    chain.spellings.delete(parsed.node);
+    const { rememberName } = await import("./storage");
+    rememberName(config, parsed.name);
+    await mount(chain);
+    const names = within(screen.getByRole("region", { name: "My names" }));
+    await names.findByText("Name text missing");
+    expect(names.getByText("external.qrl")).toBeDefined();
+    expect(names.getByText("Not set as primary")).toBeDefined();
+    expect(names.queryByText("Unknown name")).toBeNull();
+    expect(names.queryByText(parsed.node)).toBeNull();
+    expect(names.queryByText(/If you know the name/)).toBeNull();
+    expect(names.getByRole("button", { name: "Finish name setup" })).toBeDefined();
+  });
+
   it("opens the chosen name after another search and does not claim that search result", async () => {
     const chain = new MockChain();
     const parsed = seedRecords(chain, "external");

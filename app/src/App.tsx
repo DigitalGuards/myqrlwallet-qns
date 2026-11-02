@@ -83,6 +83,10 @@ function sameClaimRequest(left: ClaimScope, right: ClaimScope): boolean {
 
 function ownedNameStatus(name: OwnedName, account: string | null, config: NetworkConfig): string {
   if (name.records === null) return name.error;
+  // The registrar stores only the label hash, so a name registered without its name record
+  // has no readable spelling and every other check depends on knowing it.
+  if (name.name === null)
+    return "Registered without saving its name text, so this page cannot show it";
   if (name.records.resolverStatus === "unusable") return "Resolver not usable";
   if (!name.records.address) return "Address record missing";
   if (name.records.address !== account) return "Address record needs updating";
@@ -1106,14 +1110,14 @@ export function App({
                       return (
                         <li key={name.node}>
                           <dl>
-                            <Row label="Name">{name.name ?? "Spelling unavailable"}</Row>
+                            <Row label="Name">{name.name ?? "Unknown name"}</Row>
                             {!name.name && (
                               <Row label="Name hash" mono>
                                 {name.node}
                               </Row>
                             )}
                             <Row label="State">{ownedNameStatus(name, wallet.account, config)}</Row>
-                            {name.primary === false && (
+                            {name.name !== null && name.primary === false && (
                               <Row label="Primary name">Not set as primary</Row>
                             )}
                           </dl>
@@ -1148,7 +1152,7 @@ export function App({
                             )
                           ) : (
                             <p className="muted text-sm">
-                              Search its spelling above to check and complete setup.
+                              If you know the name, search it above to finish its setup.
                             </p>
                           )}
                         </li>
