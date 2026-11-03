@@ -30,7 +30,9 @@ function nonzeroAddress(value, label, sdk) {
 
 function checksummedAddress(value, label, sdk) {
     const address = nonzeroAddress(value, label, sdk);
-    if (value !== toChecksumAddress(value.toLowerCase())) {
+    // Checksum the lowercase spelling. @theqrl/web3 2.0.0 refuses a lowercase
+    // q prefix, so the prefix goes back to Q before the call.
+    if (value !== toChecksumAddress(value.toLowerCase().replace(/^q/, "Q"))) {
         throw new Error(`${label} must be the checksummed address`);
     }
     return address;
