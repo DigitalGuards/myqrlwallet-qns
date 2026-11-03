@@ -28,9 +28,10 @@ function loadAbi(contractName) {
     return loadJson(path.join(artifactsDir, `${contractName}.abi`));
 }
 
-// QRL web3 contracts constructed via `new web3.qrl.Contract(abi, addr)` do not
-// inherit the wallet. Use encodeABI + qrl.sendTransaction (the
-// QuantaPool deployment pattern, GPL-3.0).
+// Sign through encodeABI + qrl.sendTransaction (the QuantaPool deployment
+// pattern, GPL-3.0), so the local wallet signs on every web3 version. Under
+// @theqrl/web3 1.x a `new web3.qrl.Contract(abi, addr)` did not inherit the
+// wallet and its .send() asked the node to sign; 2.x shares web3.qrl.wallet.
 async function sendTx(web3, contract, method, account, label) {
     const data = method.encodeABI();
     const gas = await method.estimateGas({ from: account.address });
