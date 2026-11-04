@@ -1,10 +1,21 @@
 name: CI
 
+# Each change is tested once, on its pull request. The weekly run surfaces drift
+# in the registry. The lint ratchet's integration suite has its own workflow,
+# lint-tooling-ci.yml, because it tests the lint tooling itself.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The Hyperion compile and native semantic gates (npm run compile and
 # npm run test:semantic), the compiler half of the contract lint gate
@@ -19,13 +30,16 @@ jobs:
   scripts:
     name: Deployment scripts (node:test)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -49,36 +63,30 @@ jobs:
   sdk:
     name: SDK (TypeScript)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     defaults:
       run:
         working-directory: sdk
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: sdk/package-lock.json
 
       - name: Install
-        run: nice -n 10 npm ci
+        run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Lint ratchet
+      - name: Lint through the ratchet
         env:
-          LINT_RATCHET_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          LINT_RATCHET_BASE: ${{ github.event.pull_request.base.sha || 'HEAD' }}
         run: npm run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"
-
-      - name: Ratchet integration tests
-        env:
-          LINT_RATCHET_TEST_PACKAGE: sdk
-        run: node --test ../test/lint-ratchet/integration.test.js
 
       - name: Typecheck
         run: npm run typecheck
@@ -93,12 +101,14 @@ jobs:
   app:
     name: Registration app
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -107,32 +117,24 @@ jobs:
             app/package-lock.json
 
       - name: Install and build SDK
-        run: nice -n 10 npm --prefix sdk ci && nice -n 10 npm --prefix sdk run build
+        run: npm --prefix sdk ci && npm --prefix sdk run build
 
       - name: Install app
-        run: nice -n 10 npm --prefix app ci
+        run: npm --prefix app ci
 
       - name: Format
-        run: nice -n 10 npm --prefix app run format:check
+        run: npm --prefix app run format:check
 
-      - name: Lint
-        run: nice -n 10 npm --prefix app run lint
-
-      - name: Lint ratchet
+      - name: Lint through the ratchet
         env:
-          LINT_RATCHET_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: nice -n 10 npm --prefix app run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"
-
-      - name: Ratchet integration tests
-        env:
-          LINT_RATCHET_TEST_PACKAGE: app
-        run: nice -n 10 node --test test/lint-ratchet/integration.test.js
+          LINT_RATCHET_BASE: ${{ github.event.pull_request.base.sha || 'HEAD' }}
+        run: npm --prefix app run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"
 
       - name: Typecheck
-        run: nice -n 10 npm --prefix app run typecheck
+        run: npm --prefix app run typecheck
 
       - name: Test
-        run: nice -n 10 npm --prefix app test
+        run: npm --prefix app test
 
       - name: Build
-        run: nice -n 10 npm --prefix app run build
+        run: npm --prefix app run build

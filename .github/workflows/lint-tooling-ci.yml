@@ -1,0 +1,71 @@
+name: Lint tooling CI
+
+# The ratchet's integration suite tests the lint tooling itself and takes two to
+# four minutes per package, so it runs when that tooling or a package's lint
+# inputs change, and weekly. Every pull request still lints through the ratchet
+# in ci.yml.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/lint-ratchet*.mjs"
+      - "test/lint-ratchet/**"
+      - "sdk/eslint.config.*"
+      - "app/eslint.config.*"
+      - "sdk/tsconfig*.json"
+      - "app/tsconfig*.json"
+      - "sdk/package.json"
+      - "app/package.json"
+      - ".github/workflows/lint-tooling-ci.yml"
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ratchet:
+    name: Ratchet integration (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: sdk
+            directory: sdk
+            suite: ../test/lint-ratchet/integration.test.js
+          - package: app
+            directory: .
+            suite: test/lint-ratchet/integration.test.js
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            sdk/package-lock.json
+            app/package-lock.json
+
+      - name: Install and build SDK
+        run: npm --prefix sdk ci && npm --prefix sdk run build
+
+      - name: Install app
+        if: ${{ matrix.package == 'app' }}
+        run: npm --prefix app ci
+
+      - name: Ratchet integration tests
+        working-directory: ${{ matrix.directory }}
+        env:
+          LINT_RATCHET_TEST_PACKAGE: ${{ matrix.package }}
+        run: node --test ${{ matrix.suite }}
