@@ -316,6 +316,31 @@ for (const field of ["finalOwner", "rootControllers"]) {
         else fixture.config.handoff.rootControllers = [CONTROLLER];
         await assert.rejects(preview(fixture), /must be the checksummed address/);
     });
+
+    test(`accepts only the capital Q spelling of the checksum for ${field}`, async () => {
+        const correct = toChecksumAddress(field === "finalOwner" ? FINAL : CONTROLLER);
+        const set = (fixture, value) => {
+            if (field === "finalOwner") fixture.config.handoff.finalOwner = value;
+            else fixture.config.handoff.rootControllers = [value];
+        };
+        const accepted = await governanceMock();
+        set(accepted, correct);
+        const plan = await preview(accepted);
+        assert.equal(typeof plan.hash, "string");
+        for (const [spelling, expected] of [
+            [`q${correct.slice(1)}`, /must be the checksummed address/],
+            [`0x${correct.slice(1)}`, /invalid qrl address/],
+        ]) {
+            const fixture = await governanceMock();
+            set(fixture, spelling);
+            await assert.rejects(preview(fixture), (error) => {
+                assert.match(error.message, expected);
+                assert.equal(error.message.includes(correct), false);
+                return true;
+            });
+            assert.equal(fixture.writes.length, 0);
+        }
+    });
 }
 
 for (const [name, address] of Object.entries(CONTRACTS)) {
