@@ -16,12 +16,23 @@ import { approvalWalletFor, type ApprovalWallet } from "@qrlwallet/connect-ui/wa
 // paired device, and the page's hint names the wallet to open.
 export const approvals = createApprovalRequests();
 let approvalWallet: ApprovalWallet | null = null;
+const approvalWalletListeners = new Set<() => void>();
 /** The wallet the newest counted request went to. */
 export const currentApprovalWallet = (): ApprovalWallet | null => approvalWallet;
+/** Calls `listener` whenever that wallet changes. Returns the unsubscribe function. */
+export function subscribeApprovalWallet(listener: () => void): () => void {
+  approvalWalletListeners.add(listener);
+  return () => {
+    approvalWalletListeners.delete(listener);
+  };
+}
 const RELAY_APPROVAL_WALLET: ApprovalWallet = { name: "MyQRLWallet", icon: null, kind: "paired" };
 function counted<T>(wallet: ApprovalWallet, method: string, send: () => Promise<T>): Promise<T> {
   if (!isApprovalMethod(method)) return send();
-  approvalWallet = wallet;
+  if (approvalWallet !== wallet) {
+    approvalWallet = wallet;
+    for (const listener of [...approvalWalletListeners]) listener();
+  }
   return approvals.track(send);
 }
 
@@ -105,6 +116,9 @@ async function settlesWithinTimeout(work: Promise<unknown>): Promise<boolean> {
 }
 
 /** Validate announcements before calling page-supplied providers. */
+const extensionName = (rdns: unknown): string =>
+  rdns === "com.qrlwallet.extension" ? "MyQRLWallet Extension" : "QRL Web3 Wallet";
+
 export function extensionAnnouncement(value: unknown): WalletChoice | null {
   if (!isRecord(value) || !isRecord(value.info) || !isRecord(value.provider)) return null;
   const { info, provider } = value;
@@ -114,11 +128,12 @@ export function extensionAnnouncement(value: unknown): WalletChoice | null {
   if (typeof request !== "function") return null;
   let walletProvider = extensionProviders.get(provider);
   if (!walletProvider) {
-    // The announcement is untrusted: approvalWalletFor keeps the name as text
-    // and the icon only when it is an image data URI.
+    // The hint uses the page's own name for the wallet, the one its status
+    // line shows. The announcement is untrusted: approvalWalletFor keeps the
+    // icon only when it is an image data URI.
     const wallet = approvalWalletFor({
       uuid: info.uuid,
-      name: info.name,
+      name: extensionName(info.rdns),
       icon: typeof info.icon === "string" ? info.icon : "",
       rdns: info.rdns,
     });
@@ -141,7 +156,7 @@ export function extensionAnnouncement(value: unknown): WalletChoice | null {
   }
   return {
     id: info.rdns,
-    name: info.rdns === "com.qrlwallet.extension" ? "MyQRLWallet Extension" : "QRL Web3 Wallet",
+    name: extensionName(info.rdns),
     provider: walletProvider,
   };
 }
@@ -220,6 +235,9 @@ export class WalletController {
     }
   }
   private clear(): void {
+    // The page no longer waits for anything in the wallet: a request that is
+    // still open there was abandoned, and the hint goes with it.
+    approvals.reset();
     this.generation++;
     this.expectedLateResponse = undefined;
     this.mode = null;

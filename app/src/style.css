@@ -522,20 +522,28 @@ footer span {
   }
 }
 
-/* The wallet a request is waiting for, named at the top right. It only
+/* The wallet a request is waiting for, named below the header at the top
+   right; at the bottom on narrow screens, where the header can wrap. It only
    informs, so clicks and taps pass through to the page. */
 .approval-hint-host {
   position: fixed;
-  /* Below the header, so the navigation stays readable. */
   top: 5.5rem;
   right: 1rem;
   z-index: 50;
   width: calc(100% - 2rem);
   max-width: 24rem;
   pointer-events: none;
-  border-radius: 12px;
 }
-.approval-hint-host:has([shown]) {
+/* The element is only rendered while the hint shows, so its backing can sit
+   on the element itself. */
+.approval-hint-host qrl-approval-hint {
+  border-radius: 12px;
   background: var(--color-background);
   box-shadow: 0 12px 32px -12px rgb(0 0 0 / 70%);
+}
+@media (max-width: 640px) {
+  .approval-hint-host {
+    top: auto;
+    bottom: 1rem;
+  }
 }

@@ -41,6 +41,7 @@ import {
   type PendingClaim,
 } from "./storage";
 import type { WalletController } from "./wallet";
+import { ApprovalHint } from "./ApprovalHint";
 import { useNameState, type NameResult } from "./useNameState";
 import {
   ClaimProgress,
@@ -52,8 +53,6 @@ import {
 } from "./ClaimProgress";
 
 const PairingModal = lazy(async () => ({ default: (await import("./PairingModal")).PairingModal }));
-// Loaded apart from the first paint: it brings in a custom element.
-const ApprovalHint = lazy(async () => ({ default: (await import("./ApprovalHint")).ApprovalHint }));
 
 interface ClaimScope {
   name: string;
@@ -819,9 +818,7 @@ export function App({
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <Suspense fallback={null}>
-        <ApprovalHint />
-      </Suspense>
+      <ApprovalHint />
       <header className="site-header">
         <a href="#" className="wordmark" aria-label="QNS home">
           Q<span>NS</span>
