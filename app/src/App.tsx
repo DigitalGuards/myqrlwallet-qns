@@ -41,6 +41,7 @@ import {
   type PendingClaim,
 } from "./storage";
 import type { WalletController } from "./wallet";
+import { ApprovalHint } from "./ApprovalHint";
 import { useNameState, type NameResult } from "./useNameState";
 import {
   ClaimProgress,
@@ -817,6 +818,7 @@ export function App({
       <a className="skip-link" href="#main">
         Skip to content
       </a>
+      <ApprovalHint />
       <header className="site-header">
         <a href="#" className="wordmark" aria-label="QNS home">
           Q<span>NS</span>

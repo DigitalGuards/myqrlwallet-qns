@@ -7,6 +7,34 @@ import {
   type ExtensionSession,
   type ExtensionSessionState,
 } from "@qrlwallet/connect-ui/extension";
+import { createApprovalRequests, isApprovalMethod } from "@qrlwallet/connect-ui/flow";
+import { approvalWalletFor, type ApprovalWallet } from "@qrlwallet/connect-ui/wallets";
+
+// The wallet requests that wait for the user, counted where they are sent: a
+// request is open from the moment it goes to the wallet until the wallet
+// answers. A prompt can sit unseen behind the wallet's toolbar icon or on a
+// paired device, and the page's hint names the wallet to open.
+export const approvals = createApprovalRequests();
+let approvalWallet: ApprovalWallet | null = null;
+const approvalWalletListeners = new Set<() => void>();
+/** The wallet the newest counted request went to. */
+export const currentApprovalWallet = (): ApprovalWallet | null => approvalWallet;
+/** Calls `listener` whenever that wallet changes. Returns the unsubscribe function. */
+export function subscribeApprovalWallet(listener: () => void): () => void {
+  approvalWalletListeners.add(listener);
+  return () => {
+    approvalWalletListeners.delete(listener);
+  };
+}
+const RELAY_APPROVAL_WALLET: ApprovalWallet = { name: "MyQRLWallet", icon: null, kind: "paired" };
+function counted<T>(wallet: ApprovalWallet, method: string, send: () => Promise<T>): Promise<T> {
+  if (!isApprovalMethod(method)) return send();
+  if (approvalWallet !== wallet) {
+    approvalWallet = wallet;
+    for (const listener of [...approvalWalletListeners]) listener();
+  }
+  return approvals.track(send);
+}
 
 type Handler = (payload?: unknown) => void;
 type WalletEvent =
@@ -26,7 +54,7 @@ export interface Relay extends WalletProvider {
 export function createRelay(options: QRLConnectOptions): Relay {
   const qrl = new QRLConnect(options);
   return {
-    request: (args) => qrl.request(args),
+    request: (args) => counted(RELAY_APPROVAL_WALLET, args.method, () => qrl.request(args)),
     getConnectionURI: () => qrl.getConnectionURI(),
     newConnection: () => qrl.newConnection(),
     disconnect: () => qrl.disconnect(),
@@ -88,6 +116,9 @@ async function settlesWithinTimeout(work: Promise<unknown>): Promise<boolean> {
 }
 
 /** Validate announcements before calling page-supplied providers. */
+const extensionName = (rdns: unknown): string =>
+  rdns === "com.qrlwallet.extension" ? "MyQRLWallet Extension" : "QRL Web3 Wallet";
+
 export function extensionAnnouncement(value: unknown): WalletChoice | null {
   if (!isRecord(value) || !isRecord(value.info) || !isRecord(value.provider)) return null;
   const { info, provider } = value;
@@ -97,11 +128,21 @@ export function extensionAnnouncement(value: unknown): WalletChoice | null {
   if (typeof request !== "function") return null;
   let walletProvider = extensionProviders.get(provider);
   if (!walletProvider) {
+    // The hint uses the page's own name for the wallet, the one its status
+    // line shows. The announcement is untrusted: approvalWalletFor keeps the
+    // icon only when it is an image data URI.
+    const wallet = approvalWalletFor({
+      uuid: info.uuid,
+      name: extensionName(info.rdns),
+      icon: typeof info.icon === "string" ? info.icon : "",
+      rdns: info.rdns,
+    });
     walletProvider = {
-      async request(args) {
-        const result: unknown = Reflect.apply(request, provider, [args]);
-        return await result;
-      },
+      request: (args) =>
+        counted(wallet, args.method, async () => {
+          const result: unknown = Reflect.apply(request, provider, [args]);
+          return await result;
+        }),
       listen(event, handler) {
         if (typeof provider.on === "function")
           Reflect.apply(provider.on, provider, [event, handler]);
@@ -115,7 +156,7 @@ export function extensionAnnouncement(value: unknown): WalletChoice | null {
   }
   return {
     id: info.rdns,
-    name: info.rdns === "com.qrlwallet.extension" ? "MyQRLWallet Extension" : "QRL Web3 Wallet",
+    name: extensionName(info.rdns),
     provider: walletProvider,
   };
 }
@@ -194,6 +235,9 @@ export class WalletController {
     }
   }
   private clear(): void {
+    // The page no longer waits for anything in the wallet: a request that is
+    // still open there was abandoned, and the hint goes with it.
+    approvals.reset();
     this.generation++;
     this.expectedLateResponse = undefined;
     this.mode = null;
