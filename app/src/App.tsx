@@ -52,6 +52,8 @@ import {
 } from "./ClaimProgress";
 
 const PairingModal = lazy(async () => ({ default: (await import("./PairingModal")).PairingModal }));
+// Loaded apart from the first paint: it brings in a custom element.
+const ApprovalHint = lazy(async () => ({ default: (await import("./ApprovalHint")).ApprovalHint }));
 
 interface ClaimScope {
   name: string;
@@ -817,6 +819,9 @@ export function App({
       <a className="skip-link" href="#main">
         Skip to content
       </a>
+      <Suspense fallback={null}>
+        <ApprovalHint />
+      </Suspense>
       <header className="site-header">
         <a href="#" className="wordmark" aria-label="QNS home">
           Q<span>NS</span>

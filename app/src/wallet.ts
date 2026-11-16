@@ -7,6 +7,23 @@ import {
   type ExtensionSession,
   type ExtensionSessionState,
 } from "@qrlwallet/connect-ui/extension";
+import { createApprovalRequests, isApprovalMethod } from "@qrlwallet/connect-ui/flow";
+import { approvalWalletFor, type ApprovalWallet } from "@qrlwallet/connect-ui/wallets";
+
+// The wallet requests that wait for the user, counted where they are sent: a
+// request is open from the moment it goes to the wallet until the wallet
+// answers. A prompt can sit unseen behind the wallet's toolbar icon or on a
+// paired device, and the page's hint names the wallet to open.
+export const approvals = createApprovalRequests();
+let approvalWallet: ApprovalWallet | null = null;
+/** The wallet the newest counted request went to. */
+export const currentApprovalWallet = (): ApprovalWallet | null => approvalWallet;
+const RELAY_APPROVAL_WALLET: ApprovalWallet = { name: "MyQRLWallet", icon: null, kind: "paired" };
+function counted<T>(wallet: ApprovalWallet, method: string, send: () => Promise<T>): Promise<T> {
+  if (!isApprovalMethod(method)) return send();
+  approvalWallet = wallet;
+  return approvals.track(send);
+}
 
 type Handler = (payload?: unknown) => void;
 type WalletEvent =
@@ -26,7 +43,7 @@ export interface Relay extends WalletProvider {
 export function createRelay(options: QRLConnectOptions): Relay {
   const qrl = new QRLConnect(options);
   return {
-    request: (args) => qrl.request(args),
+    request: (args) => counted(RELAY_APPROVAL_WALLET, args.method, () => qrl.request(args)),
     getConnectionURI: () => qrl.getConnectionURI(),
     newConnection: () => qrl.newConnection(),
     disconnect: () => qrl.disconnect(),
@@ -97,11 +114,20 @@ export function extensionAnnouncement(value: unknown): WalletChoice | null {
   if (typeof request !== "function") return null;
   let walletProvider = extensionProviders.get(provider);
   if (!walletProvider) {
+    // The announcement is untrusted: approvalWalletFor keeps the name as text
+    // and the icon only when it is an image data URI.
+    const wallet = approvalWalletFor({
+      uuid: info.uuid,
+      name: info.name,
+      icon: typeof info.icon === "string" ? info.icon : "",
+      rdns: info.rdns,
+    });
     walletProvider = {
-      async request(args) {
-        const result: unknown = Reflect.apply(request, provider, [args]);
-        return await result;
-      },
+      request: (args) =>
+        counted(wallet, args.method, async () => {
+          const result: unknown = Reflect.apply(request, provider, [args]);
+          return await result;
+        }),
       listen(event, handler) {
         if (typeof provider.on === "function")
           Reflect.apply(provider.on, provider, [event, handler]);

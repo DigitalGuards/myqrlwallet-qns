@@ -521,3 +521,21 @@ footer span {
     scroll-behavior: auto;
   }
 }
+
+/* The wallet a request is waiting for, named at the top right. It only
+   informs, so clicks and taps pass through to the page. */
+.approval-hint-host {
+  position: fixed;
+  /* Below the header, so the navigation stays readable. */
+  top: 5.5rem;
+  right: 1rem;
+  z-index: 50;
+  width: calc(100% - 2rem);
+  max-width: 24rem;
+  pointer-events: none;
+  border-radius: 12px;
+}
+.approval-hint-host:has([shown]) {
+  background: var(--color-background);
+  box-shadow: 0 12px 32px -12px rgb(0 0 0 / 70%);
+}
