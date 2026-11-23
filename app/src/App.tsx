@@ -820,8 +820,9 @@ export function App({
       </a>
       <ApprovalHint />
       <header className="site-header">
-        <a href="#" className="wordmark" aria-label="QNS home">
-          Q<span>NS</span>
+        <a href="https://myqrlwallet.com/" className="wordmark" aria-label="MyQRLWallet home">
+          <img src="https://myqrlwallet.com/img/mark.svg" alt="" width="26" height="26" />
+          MyQRLWallet<span>Names</span>
         </a>
         <nav aria-label="Main navigation">
           <a href="#register">Register</a>
@@ -850,9 +851,7 @@ export function App({
         <div className="intro">
           <p className="eyebrow">QRL NAME SERVICE</p>
           <h1>
-            Your name
-            <br />
-            on <span>QRL.</span>
+            Your name on <span>QRL</span>
           </h1>
           <p className="intro-copy">
             One readable name for your QRL address.
