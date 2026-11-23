@@ -4,18 +4,18 @@
   --font-sans: "Instrument Sans Variable", system-ui, sans-serif;
   --font-display: "Sora Variable", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", monospace;
-  --color-background: #080c16;
-  --color-surface: #0e1320;
-  --color-border: #1e293c;
-  --color-primary: #33ade6;
-  --color-muted: #9daabe;
+  --color-background: #ffffff;
+  --color-surface: #ffffff;
+  --color-border: hsl(216 24% 89%);
+  --color-primary: hsl(199 89% 38%);
+  --color-muted: hsl(218 14% 36%);
 }
 
 :root {
   font-family: var(--font-sans);
-  color: #f2f5f8;
+  color: hsl(222 47% 10%);
   background: var(--color-background);
-  color-scheme: dark;
+  color-scheme: light;
   font-synthesis: none;
 }
 * {
@@ -47,7 +47,7 @@ a:hover {
 }
 button {
   background: var(--color-primary);
-  color: #052436;
+  color: #ffffff;
   border: 1px solid transparent;
   border-radius: 7px;
   padding: 0.8rem 1.1rem;
@@ -56,19 +56,19 @@ button {
   line-height: 1.4;
 }
 button:hover:not(:disabled) {
-  background: #6bc7f0;
+  background: hsl(200 92% 32%);
 }
 button:disabled {
   opacity: 0.48;
   cursor: not-allowed;
 }
 button.secondary {
-  color: #e6edf4;
+  color: hsl(222 47% 10%);
   background: transparent;
-  border-color: #35465d;
+  border-color: hsl(216 20% 78%);
 }
 button.secondary:hover:not(:disabled) {
-  background: #162338;
+  background: hsl(214 40% 97%);
 }
 button.text-button {
   color: var(--color-primary);
@@ -80,7 +80,7 @@ button.text-button {
   text-underline-offset: 4px;
 }
 :focus-visible {
-  outline: 2px solid #78d2fa;
+  outline: 2px solid hsl(199 89% 38%);
   outline-offset: 4px;
 }
 h1,
@@ -125,7 +125,7 @@ h3 {
   color: var(--color-primary);
 }
 .wordmark span {
-  color: #f2f5f8;
+  color: hsl(222 47% 10%);
 }
 .wordmark:hover {
   text-decoration: none;
@@ -137,7 +137,7 @@ nav {
   margin-right: 28px;
 }
 nav a {
-  color: #b7c3d4;
+  color: hsl(218 14% 36%);
   font-size: 14px;
 }
 .page {
@@ -152,7 +152,7 @@ nav a {
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.14em;
-  color: #9fc9df;
+  color: hsl(200 90% 30%);
 }
 .intro h1 {
   font-size: clamp(44px, 6vw, 68px);
@@ -165,7 +165,7 @@ nav a {
   color: var(--color-primary);
 }
 .intro-copy {
-  color: #aebccf;
+  color: hsl(218 14% 36%);
   line-height: 1.7;
   font-size: 17px;
 }
@@ -187,7 +187,7 @@ nav a {
   margin-bottom: 24px;
 }
 .panel:first-child {
-  border-top: 2px solid #33ade6;
+  border-top: 2px solid hsl(199 89% 38%);
 }
 .section-heading {
   margin-bottom: 24px;
@@ -202,22 +202,22 @@ nav a {
 label:not(.checkbox-label) {
   display: block;
   font-size: 13px;
-  color: #bac7d9;
+  color: hsl(218 18% 28%);
   margin-bottom: 9px;
 }
 input:not([type="checkbox"]) {
   display: block;
   min-width: 0;
   width: 100%;
-  border: 1px solid #3c4d66;
-  color: #f2f5f8;
-  background: #080e19;
+  border: 1px solid hsl(216 20% 78%);
+  color: hsl(222 47% 10%);
+  background: #ffffff;
   border-radius: 7px;
   padding: 0.88rem 1rem;
   font-size: 16px;
 }
 input::placeholder {
-  color: #8190a6;
+  color: hsl(218 12% 55%);
 }
 .search-controls {
   display: flex;
@@ -267,22 +267,22 @@ dd {
 }
 dd.font-mono {
   font-size: 11px;
-  color: #a5d6e8;
+  color: hsl(205 70% 26%);
 }
 .message {
   font-size: 14px;
-  color: #b8d8e8;
-  background: #122331;
-  border-left: 2px solid #33ade6;
+  color: hsl(205 60% 22%);
+  background: hsl(203 88% 95%);
+  border-left: 2px solid hsl(199 89% 38%);
   padding: 13px 15px;
   line-height: 1.6;
   margin: 18px 0;
   overflow-wrap: anywhere;
 }
 .message.error {
-  color: #ffb6b6;
-  background: #281920;
-  border-left-color: #ef7070;
+  color: hsl(0 65% 33%);
+  background: hsl(0 80% 97%);
+  border-left-color: hsl(0 70% 52%);
 }
 .context-panel {
   padding: 8px 0 28px;
@@ -309,7 +309,7 @@ dd.font-mono {
   margin-bottom: 25px;
 }
 .guide li > span {
-  color: #5c7895;
+  color: hsl(218 12% 44%);
   font-family: var(--font-mono);
   font-size: 12px;
   padding-top: 3px;
@@ -357,7 +357,7 @@ dd.font-mono {
   border-left-color: var(--color-primary);
 }
 .step-number {
-  color: #9fc9df;
+  color: hsl(200 90% 30%);
   font-size: 12px;
   margin-bottom: 8px;
 }
@@ -387,15 +387,15 @@ dd.font-mono {
 }
 .wallet-dialog {
   width: min(440px, calc(100vw - 32px));
-  border: 1px solid #35465d;
+  border: 1px solid hsl(216 24% 89%);
   border-radius: 12px;
-  color: #f2f5f8;
-  background: #0e1320;
+  color: hsl(222 47% 10%);
+  background: #ffffff;
   padding: 28px;
   margin: auto;
 }
 .wallet-dialog::backdrop {
-  background: rgb(3 7 15 / 85%);
+  background: rgb(15 23 42 / 45%);
 }
 .wallet-dialog > p {
   font-size: 14px;
@@ -410,12 +410,12 @@ dd.font-mono {
 }
 button.wallet-option {
   text-align: left;
-  color: #e6edf4;
-  background: #121c2d;
-  border-color: #35465d;
+  color: hsl(222 47% 10%);
+  background: hsl(214 40% 97%);
+  border-color: hsl(216 24% 89%);
 }
 button.wallet-option:hover {
-  background: #1c3045;
+  background: hsl(203 88% 93%);
 }
 .wallet-option strong,
 .wallet-option span {
@@ -435,7 +435,7 @@ footer {
   display: flex;
   gap: 24px;
   flex-wrap: wrap;
-  color: #93a0b4;
+  color: hsl(218 12% 44%);
   font-size: 12px;
 }
 footer span {
@@ -445,7 +445,7 @@ footer span {
   position: absolute;
   left: 16px;
   top: -100px;
-  background: #0e1320;
+  background: #ffffff;
   padding: 12px;
   z-index: 10;
 }
@@ -539,11 +539,162 @@ footer span {
 .approval-hint-host qrl-approval-hint {
   border-radius: 12px;
   background: var(--color-background);
-  box-shadow: 0 12px 32px -12px rgb(0 0 0 / 70%);
+  box-shadow: 0 12px 32px -12px rgb(15 23 42 / 25%);
 }
 @media (max-width: 640px) {
   .approval-hint-host {
     top: auto;
     bottom: 1rem;
+  }
+}
+
+/* ---- Light look, shared with the myqrlwallet.com home page (23 Nov 2026) ----
+   The rules above keep the structure; these set the page shell: a soft blue
+   wash behind the header and intro, the rounded header bar, a centred intro
+   with a capped headline, and panels as plain white cards. */
+body {
+  background: linear-gradient(180deg, hsl(203 90% 95%) 0, #ffffff 30rem) no-repeat #ffffff;
+}
+.site-header {
+  max-width: 1180px;
+  margin: 18px auto 0;
+  width: calc(100% - 64px);
+  min-height: 66px;
+  padding: 0 12px 0 24px;
+  border: 0;
+  border-radius: 33px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 0 hsl(216 24% 89%),
+    0 12px 30px -18px hsl(222 50% 20% / 25%);
+}
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: hsl(222 47% 10%);
+}
+.wordmark img {
+  width: 26px;
+  height: 26px;
+}
+.wordmark span {
+  color: hsl(218 14% 36%);
+  font-weight: 500;
+  padding-left: 10px;
+  border-left: 1px solid hsl(216 20% 80%);
+}
+nav a {
+  font-size: 15.5px;
+  font-weight: 500;
+}
+nav a:hover {
+  color: hsl(222 47% 10%);
+  text-decoration: none;
+}
+.site-header button {
+  border-radius: 999px;
+  padding: 0.62rem 1.25rem;
+  font-size: 15px;
+}
+.site-header button.secondary {
+  color: #ffffff;
+  background: hsl(199 89% 38%);
+  border-color: transparent;
+}
+.site-header button.secondary:hover:not(:disabled) {
+  background: hsl(200 92% 32%);
+}
+button {
+  border-radius: 12px;
+}
+input:not([type="checkbox"]) {
+  border-radius: 12px;
+}
+input:not([type="checkbox"]):focus-visible {
+  outline-offset: 1px;
+}
+.page {
+  max-width: 1180px;
+  padding: clamp(34px, 6.5vh, 62px) 32px 72px;
+}
+.intro {
+  text-align: center;
+  padding-bottom: clamp(30px, 5vh, 46px);
+}
+.eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+.intro h1 {
+  font-size: clamp(2.3rem, 3.3vw, 3.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.032em;
+  font-weight: 600;
+  margin: 16px 0 18px;
+  color: hsl(222 47% 10%);
+}
+.intro-copy {
+  font-size: clamp(1.04rem, 1.15vw, 1.2rem);
+  line-height: 1.55;
+  max-width: 34rem;
+  margin: 0 auto;
+}
+h2 {
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.panel {
+  border-radius: 24px;
+  padding: 32px;
+  box-shadow: 0 18px 40px -30px hsl(222 50% 20% / 35%);
+}
+.panel:first-child {
+  border-top: 1px solid var(--color-border);
+  border-color: transparent;
+  background: hsl(203 88% 95%);
+  box-shadow: none;
+}
+.context-panel {
+  border-radius: 24px;
+  background: hsl(214 40% 97%);
+  padding: 24px 24px 12px;
+  border-bottom: 0;
+}
+.guide {
+  background: transparent;
+  padding-inline: 4px;
+}
+.wallet-dialog {
+  border-radius: 24px;
+  box-shadow: 0 40px 80px -30px hsl(222 60% 12% / 45%);
+}
+footer {
+  max-width: 1180px;
+  font-size: 14px;
+}
+@media (max-width: 800px) {
+  nav {
+    display: none;
+  }
+}
+@media (max-width: 540px) {
+  .site-header {
+    width: calc(100% - 28px);
+    padding: 0 10px 0 16px;
+    flex-wrap: nowrap;
+  }
+  .wordmark {
+    font-size: 17px;
+  }
+  .page {
+    padding: 30px 16px 40px;
+  }
+  .panel {
+    padding: 24px 20px;
+    border-radius: 20px;
   }
 }
