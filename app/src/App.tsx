@@ -100,6 +100,13 @@ function ownedNameStatus(name: OwnedName, account: string | null, config: Networ
   return name.primary ? "Ready and your primary name" : "Ready";
 }
 
+/** One plain line when My names stopped at its check limit. */
+export function uncheckedNotice(count: number): string {
+  return count === 1
+    ? "1 more name from this address's history was not checked. Search for a name to check it."
+    : `${String(count)} more names from this address's history were not checked. Search for a name to check it.`;
+}
+
 function Row({
   label,
   children,
@@ -253,6 +260,7 @@ export function App({
   const [names, setNames] = useState<OwnedName[]>([]);
   const [namesLoading, setNamesLoading] = useState(false);
   const [namesError, setNamesError] = useState<string | null>(null);
+  const [namesUnchecked, setNamesUnchecked] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [lookupInput, setLookupInput] = useState("");
   const [lookup, setLookup] = useState<{ label: string; value: string } | null>(null);
@@ -365,10 +373,15 @@ export function App({
     const abort = new AbortController();
     setNames([]);
     setNamesError(null);
+    setNamesUnchecked(0);
     setNamesLoading(false);
     if (wallet.account && network.ready) {
       setNamesLoading(true);
-      void listOwnedNames(wallet.account, { config, provider }, knownNames(config), abort.signal)
+      void listOwnedNames(wallet.account, { config, provider }, knownNames(config), abort.signal, {
+        onUnchecked: (count) => {
+          if (!abort.signal.aborted) setNamesUnchecked(count);
+        },
+      })
         .then((items) => {
           if (!abort.signal.aborted) setNames(items);
         })
@@ -1101,6 +1114,9 @@ export function App({
                   {namesError && <Message error>{namesError}</Message>}
                   {!namesLoading && !namesError && names.length === 0 && (
                     <p className="muted mt-4">You do not own any .qrl names yet.</p>
+                  )}
+                  {!namesLoading && !namesError && namesUnchecked > 0 && (
+                    <p className="muted mt-4">{uncheckedNotice(namesUnchecked)}</p>
                   )}
                   <ul className="owned-names">
                     {names.map((name) => {
