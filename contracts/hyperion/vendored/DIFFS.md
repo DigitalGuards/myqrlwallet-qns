@@ -48,6 +48,8 @@ This source-level divergence preserves complete native 64-byte `address` and lef
 
 Derived from upstream `FIFSRegistrar` with additions: a `Registered` event, an `available(bytes32)` view, and a custom `NotAvailable` error in place of the upstream bare `require`.
 
+A claim of an unowned name calls `setSubnodeRecord(baseNode, label, owner, address(0), 0)`, so it clears the registry resolver and TTL that an earlier owner left. Upstream `FIFSRegistrar` calls `setSubnodeOwner` on every registration; the QNS registrar keeps that call for a transfer by the current owner.
+
 ## OpenZeppelin subset
 
 The files under `openzeppelin/` are small in-tree implementations of the OZ v5 Ownable and ERC-165 behavior required by QNS. They avoid compiler remapping and submodule dependencies. They are MIT-licensed.

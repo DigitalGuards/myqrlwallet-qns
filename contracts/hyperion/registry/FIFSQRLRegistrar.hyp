@@ -15,6 +15,12 @@ import {IQNSRegistry} from "../vendored/registry/IQNSRegistry.hyp";
 ///     writes `subnode = keccak(baseNode || label)` with `owner` in the
 ///     registry. The existing subnode owner (if any) must either be `0x0` or
 ///     be the caller (so the existing owner can reassign / transfer).
+///   - A claim of an unowned subnode also sets its registry resolver and TTL
+///     to zero, so a released name starts without the previous owner's
+///     resolver pointer. A transfer by the current owner keeps both.
+///     Records already stored in a resolver and existing subnames of the
+///     node are outside the registry record and stay until the new owner
+///     clears or reclaims them.
 ///
 /// This is the alpha registrar: no pricing, no commit/reveal, no grace period.
 /// Suitable for Testnet V2. Phase 5 replaces with a commit/reveal + pricing
@@ -39,16 +45,20 @@ contract FIFSQRLRegistrar {
 
     /// @notice Registers a subnode (label) under `baseNode` to `owner`.
     ///         Succeeds if the subnode is unassigned (owner == 0x0) or if the
-    ///         existing owner is the caller (self-transfer).
+    ///         existing owner is the caller (self-transfer). Claiming an
+    ///         unassigned subnode resets its registry resolver and TTL.
     /// @param label The keccak256 of the label string (e.g., `labelhash("alice")`).
     /// @param owner The new owner address for the subnode.
     function register(bytes32 label, address owner) external {
         bytes32 subnode = keccak256(abi.encodePacked(baseNode, label));
         address currentOwner = qns.owner(subnode);
-        if (currentOwner != address(0) && currentOwner != msg.sender) {
+        if (currentOwner == address(0)) {
+            qns.setSubnodeRecord(baseNode, label, owner, address(0), 0);
+        } else if (currentOwner == msg.sender) {
+            qns.setSubnodeOwner(baseNode, label, owner);
+        } else {
             revert NotAvailable(label, currentOwner);
         }
-        qns.setSubnodeOwner(baseNode, label, owner);
         emit Registered(label, owner);
     }
 

@@ -150,6 +150,7 @@ const OPERATIONS = Object.freeze([
     [0.5, (r, s) => ({ actor: ownerActor(r, s, "rr"), contract: "rr", fn: "transferOwnership", args: [chooseAddress(r)] })],
     [0.2, (r, s) => ({ actor: ownerActor(r, s, "rr"), contract: "rr", fn: "renounceOwnership", args: [] })],
     [8, (r) => ({ actor: r.pick(ACTOR_NAMES), contract: "fifs", fn: "register", args: [chooseFrom(r, QRL_LABELS), chooseAddress(r)] })],
+    [3, (r, s) => releaseStep(r, s)],
     [5, (r, s) => nodeStep(r, s, "resolver", "setAddr", (node) => [node, chooseAddress(r)])],
     [4, (r, s) => nodeStep(r, s, "resolver", "setText", (node) => [node, r.pick(TEXT_KEYS), r.pick(TEXT_VALUES)])],
     [3, (r, s) => nodeStep(r, s, "resolver", "setContenthash", (node) => [node, r.pick(CONTENTHASHES)])],
@@ -163,6 +164,20 @@ function nodeStep(random, state, contract, fn, buildArgs) {
     const live = NODE_LIST.filter((node) => authorisedActors(state, node).length > 0);
     const node = live.length > 0 && random.chance(0.7) ? random.pick(live) : random.pick(NODE_LIST);
     return { actor: chooseNodeActor(random, state, node), contract, fn, args: buildArgs(node) };
+}
+
+// Releases a .qrl name to the zero address or parks it with the registry, so
+// later FIFS claims start from a name that still carries earlier state. Half
+// of the releases use setRecord, which also leaves a resolver and TTL behind.
+function releaseStep(random, state) {
+    const names = QRL_LABELS.map((label) => W.subnode(W.NODES.qrl, label));
+    const held = names.filter((node) => authorisedActors(state, node).length > 0);
+    const node = held.length > 0 && random.chance(0.9) ? random.pick(held) : random.pick(names);
+    const authorised = authorisedActors(state, node);
+    const actor = authorised.length > 0 && random.chance(0.9) ? random.pick(authorised) : random.pick(ACTOR_NAMES);
+    const parked = random.chance(0.8) ? W.ZERO : W.CONTRACTS.registry;
+    if (random.chance(0.5)) return { actor, contract: "registry", fn: "setOwner", args: [node, parked] };
+    return { actor, contract: "registry", fn: "setRecord", args: [node, parked, chooseResolver(random), random.pick(TTLS)] };
 }
 
 function claimForAddrStep(random) {
