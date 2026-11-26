@@ -498,7 +498,11 @@ export function App({
     if (
       !target?.setup ||
       (!target.available && target.owner !== wallet.account) ||
-      setupComplete(target.setup, makePrimary) ||
+      setupComplete(
+        target.setup,
+        makePrimary,
+        wallet.account ? plannedClear(config, wallet.account, target.node) : null,
+      ) ||
       !wallet.account ||
       !wallet.provider ||
       !wallet.transport ||
@@ -528,9 +532,9 @@ export function App({
     setFlow({ ...scope, primary: makePrimary, plan });
     setUpdateState(null);
     rememberName(config, name);
-    // A clear decided now stays with this account's claim until the claim finishes.
+    // A clear decided now is saved once this claim's own register has confirmed, so it stays
+    // with a name the account owns, and is dropped when the claim finishes.
     const clear = plan.find((entry) => entry.step === "clear")?.version;
-    if (clear !== undefined) savePlannedClear(config, account, target.node, clear);
     try {
       await registerName(name, {
         config,
@@ -543,6 +547,8 @@ export function App({
         plan,
         signal: abort.signal,
         onUpdate: (update) => {
+          if (clear !== undefined && update.step === "register" && update.status === "confirmed")
+            savePlannedClear(config, account, target.node, clear);
           // Preserve the original account's submitted operation after a wallet switch.
           const saved = savedClaim(account);
           if (abort.signal.aborted && saved?.attemptId !== attemptId) return;
@@ -768,7 +774,8 @@ export function App({
     search && wallet.account ? plannedClear(config, wallet.account, search.node) : null;
   const searchPlan = search?.setup ? registrationPlan(search.setup, primary, searchClear) : null;
   const approvalPlan = claiming ? flow?.plan : searchPlan;
-  const showApprovals = claiming || (canClaim && !setupComplete(search.setup, primary));
+  const showApprovals =
+    claiming || (canClaim && !setupComplete(search.setup, primary, searchClear));
   const deployed = isDeployed(config);
   const selection = getSelection();
   const recovery = pending ? { ...claimScope(pending), primary: pending.primary ?? false } : null;
@@ -983,7 +990,7 @@ export function App({
                   )}
                   {approvalDetails}
                   {wallet.account
-                    ? !setupComplete(search.setup, primary) && (
+                    ? !setupComplete(search.setup, primary, searchClear) && (
                         <button
                           className="w-full mt-5"
                           disabled={

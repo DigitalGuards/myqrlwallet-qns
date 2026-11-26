@@ -57,13 +57,28 @@ export const stepDetails = {
   },
 } as const;
 
+/** A saved clear stays owed while the record version has not moved past the planned one. */
+export function clearOwed(
+  state: RegistrationState | null | undefined,
+  planned: PlannedClear | null,
+): boolean {
+  return (
+    planned !== null &&
+    state?.owner !== null &&
+    state?.owner !== undefined &&
+    state.recordVersion <= BigInt(planned.version)
+  );
+}
+
 export function setupComplete(
   state: RegistrationState | null | undefined,
   primary: boolean,
+  planned: PlannedClear | null = null,
 ): boolean {
   return (
     state !== null &&
     state !== undefined &&
+    !clearOwed(state, planned) &&
     claimSteps.every((step) => (step === "primary" && !primary) || state.complete[step])
   );
 }
@@ -201,7 +216,8 @@ function progressFor({
     return {
       step,
       update:
-        (!required || (!running && state?.complete[step])) &&
+        // A clear row's state comes from the plan: an owned name always reads complete.clear.
+        (!required || (!running && step !== "clear" && state?.complete[step])) &&
         (!update || update.status === "skipped" || (update.status === "failed" && !update.hash))
           ? { ...update, step, status: "skipped" as const }
           : update,
@@ -218,7 +234,10 @@ function progressFor({
     ) ??
     progress.find(({ update }) => update?.status !== "confirmed" && update?.status !== "skipped");
   const ready =
-    setupComplete(state, primary) && !running && !updates.some(transactionInFlight) && !current;
+    setupComplete(state, primary, plannedClear) &&
+    !running &&
+    !updates.some(transactionInFlight) &&
+    !current;
   const summary = ready
     ? `${name} is ready. It resolves to your address${state?.complete.primary ? " and is your primary name" : ""}.`
     : running || updates.length > 0

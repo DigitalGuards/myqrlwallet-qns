@@ -73,9 +73,6 @@ describe("earlier owner line", () => {
     expect(screen.getByText("Wallet approvals").nextElementSibling?.textContent).toBe(
       "4 remaining",
     );
-    chain.afterReceipt = () => {
-      if (chain.sent.length === 1) expect(plannedClear(config, ACCOUNT, alice.node)).not.toBeNull();
-    };
     fireEvent.click(screen.getByRole("button", { name: "Claim name" }));
     await screen.findByText("alice.qrl is ready. It resolves to your address.");
     expect(chain.sent.map((tx) => tx.data)).toEqual(
@@ -117,6 +114,49 @@ describe("earlier owner line", () => {
     await mount(owned, true);
     expect(screen.queryByText(/An earlier owner/)).toBeNull();
     expect(screen.queryByRole("heading", { name: "Clear earlier records" })).toBeNull();
+  });
+});
+
+describe("resuming a claim with a saved clear", () => {
+  it("saves nothing when the register approval is rejected", async () => {
+    const chain = released();
+    chain.rejectSend = 1;
+    await mount(chain, true);
+    fireEvent.click(screen.getByRole("button", { name: "Claim name" }));
+    await screen.findByText(/rejected/i);
+    expect(chain.sent).toHaveLength(0);
+    expect(plannedClear(config, ACCOUNT, alice.node)).toBeNull();
+  });
+
+  it.each([
+    ["the earlier owner's own values", OTHER],
+    ["values preset to the claimant's address and spelling", ACCOUNT],
+  ])("offers and sends the clear after an interruption, with %s", async (_label, preset) => {
+    const chain = released();
+    chain.addresses.set(alice.node, preset);
+    chain.rejectSend = 2;
+    await mount(chain, true);
+    fireEvent.click(screen.getByRole("button", { name: "Claim name" }));
+    await screen.findByText(/rejected/i);
+    expect(chain.sent).toHaveLength(1);
+    expect(plannedClear(config, ACCOUNT, alice.node)).not.toBeNull();
+    chain.rejectSend = 0;
+    const action = await screen.findByRole("button", { name: "Complete name setup" });
+    await waitFor(() => {
+      expect(action.hasAttribute("disabled")).toBe(false);
+    });
+    const steps = within(screen.getByRole("list", { name: "Claim steps" }));
+    const row = steps.getByRole("heading", { name: "Clear earlier records" }).closest("li");
+    if (!(row instanceof HTMLElement)) throw new Error("Missing clear row");
+    // The owed clear is never shown as skipped.
+    expect(within(row).queryByText("Skipped")).toBeNull();
+    fireEvent.click(action);
+    await screen.findByText("alice.qrl is ready. It resolves to your address.");
+    expect(chain.sent.map((tx) => tx.data).slice(1, 2)).toEqual([
+      registrationTransaction(alice.name, ACCOUNT, "clear", config).data,
+    ]);
+    expect(chain.contenthashes.has(alice.node)).toBe(false);
+    expect(plannedClear(config, ACCOUNT, alice.node)).toBeNull();
   });
 });
 
