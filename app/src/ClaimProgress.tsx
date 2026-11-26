@@ -2,6 +2,7 @@ import {
   requireContract,
   registrationPlan,
   registrationSteps,
+  type PlannedClear,
   type RegistrationPlan,
   type TransactionStatus,
   type NetworkConfig,
@@ -18,6 +19,13 @@ export const stepDetails = {
     role: "FIFS registrar",
     contract: "FIFSQRLRegistrar",
     function: "register(label, owner)",
+  },
+  clear: {
+    title: "Clear earlier records",
+    description: (name: string) => `Removes the records an earlier owner left on ${name}.`,
+    role: "Public resolver",
+    contract: "QRLPublicResolver",
+    function: "clearRecords(node)",
   },
   resolver: {
     title: "Choose where records live",
@@ -49,13 +57,28 @@ export const stepDetails = {
   },
 } as const;
 
+/** A saved clear stays owed while the record version has not moved past the planned one. */
+export function clearOwed(
+  state: RegistrationState | null | undefined,
+  planned: PlannedClear | null,
+): boolean {
+  return (
+    planned !== null &&
+    state?.owner !== null &&
+    state?.owner !== undefined &&
+    state.recordVersion <= BigInt(planned.version)
+  );
+}
+
 export function setupComplete(
   state: RegistrationState | null | undefined,
   primary: boolean,
+  planned: PlannedClear | null = null,
 ): boolean {
   return (
     state !== null &&
     state !== undefined &&
+    !clearOwed(state, planned) &&
     claimSteps.every((step) => (step === "primary" && !primary) || state.complete[step])
   );
 }
@@ -149,6 +172,8 @@ interface ClaimProgressProps {
   primary: boolean;
   state: RegistrationState | null | undefined;
   plan?: RegistrationPlan;
+  /** A clear saved with this account's claim of the name, carried into a resumed plan. */
+  plannedClear?: PlannedClear | null;
   updates: TransactionUpdate[];
   running: boolean;
   connected?: boolean;
@@ -172,17 +197,18 @@ function progressFor({
   primary,
   state,
   plan: suppliedPlan,
+  plannedClear = null,
   updates,
   running,
   connected = false,
   searching = false,
   searchError = null,
 }: ClaimProgressProps) {
-  const plan = suppliedPlan ?? (state ? registrationPlan(state, primary) : null);
+  const plan = suppliedPlan ?? (state ? registrationPlan(state, primary, plannedClear) : null);
   const entries =
     plan ??
     claimSteps
-      .filter((step) => step !== "primary" || primary)
+      .filter((step) => (step !== "primary" || primary) && step !== "clear")
       .map((step) => ({ step, required: true }));
   const steps = entries.map(({ step }) => step);
   const progress = entries.map(({ step, required }) => {
@@ -190,7 +216,8 @@ function progressFor({
     return {
       step,
       update:
-        (!required || (!running && state?.complete[step])) &&
+        // A clear row's state comes from the plan: an owned name always reads complete.clear.
+        (!required || (!running && step !== "clear" && state?.complete[step])) &&
         (!update || update.status === "skipped" || (update.status === "failed" && !update.hash))
           ? { ...update, step, status: "skipped" as const }
           : update,
@@ -207,7 +234,10 @@ function progressFor({
     ) ??
     progress.find(({ update }) => update?.status !== "confirmed" && update?.status !== "skipped");
   const ready =
-    setupComplete(state, primary) && !running && !updates.some(transactionInFlight) && !current;
+    setupComplete(state, primary, plannedClear) &&
+    !running &&
+    !updates.some(transactionInFlight) &&
+    !current;
   const summary = ready
     ? `${name} is ready. It resolves to your address${state?.complete.primary ? " and is your primary name" : ""}.`
     : running || updates.length > 0

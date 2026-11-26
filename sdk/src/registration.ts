@@ -17,6 +17,12 @@ import {
   ZERO_ADDRESS,
 } from "./abi.js";
 import { assertNetwork, CONTRACT_NAMES, requireContract, type NetworkConfig } from "./config.js";
+import {
+  readEarlierState,
+  readRecordVersion,
+  type EarlierState,
+  type NameHistoryCache,
+} from "./earlier.js";
 import { isHexBytes } from "./guards.js";
 import { namehash, nodeToHex } from "./namehash.js";
 import { normalize, QnsNameError } from "./normalize.js";
@@ -45,6 +51,8 @@ export function registrationName(input: string): {
 export interface RegistrationContext {
   config: NetworkConfig;
   provider: RpcProvider;
+  /** Session log history per name, for the earlier-owner reads. */
+  history?: NameHistoryCache;
 }
 
 export async function nameOwner(
@@ -72,6 +80,31 @@ export async function isAvailable(input: string, context: RegistrationContext): 
       bytes32Word(labelHash),
     ),
   );
+}
+
+/**
+ * What an earlier owner left on an unowned name: the resolver pointer, records, the log state
+ * and one level of subnames. Null for a name that has an owner.
+ */
+export async function readNameLeftovers(
+  input: string,
+  context: RegistrationContext,
+  block?: string,
+): Promise<EarlierState | null> {
+  const at =
+    block ?? toQuantity(quantity(await context.provider.request({ method: "qrl_blockNumber" })));
+  const { node } = registrationName(input);
+  const owner = decodeAddress(
+    await call(
+      context.provider,
+      requireContract(context.config, "QNSRegistry"),
+      "owner(bytes32)",
+      bytes32Word(node),
+      at,
+    ),
+  );
+  if (owner !== ZERO_ADDRESS) return null;
+  return readEarlierState(node, context, at, { subnames: true });
 }
 
 /** Check code and wiring before offering writes. No deployment transactions are sent. */
@@ -114,7 +147,15 @@ export async function assertDeployment(context: RegistrationContext): Promise<vo
   }
 }
 
-export const registrationSteps = ["register", "resolver", "address", "name", "primary"] as const;
+/** Every step a plan can contain. A plan's own order depends on the resolver pointer. */
+export const registrationSteps = [
+  "register",
+  "clear",
+  "address",
+  "resolver",
+  "name",
+  "primary",
+] as const;
 export type RegistrationStep = (typeof registrationSteps)[number];
 export type TransactionStatus =
   | "approval"
@@ -151,6 +192,10 @@ export function registrationTransaction(
     register: {
       to: requireContract(config, "FIFSQRLRegistrar"),
       data: selector("register(bytes32,address)") + bytes32Word(labelHash) + addressWord(from),
+    },
+    clear: {
+      to: resolver,
+      data: selector("clearRecords(bytes32)") + bytes32Word(node),
     },
     resolver: {
       to: requireContract(config, "QNSRegistry"),
@@ -272,18 +317,63 @@ function isExecutionRevert(error: unknown): error is { message: string } {
 export interface RegistrationState extends NameRecords {
   owner: string | null;
   primary: string | null;
+  /** The public resolver's record version for the node at the snapshot. */
+  recordVersion: bigint;
+  /** The registry points the name at a contract other than the public resolver. */
+  foreignResolver: boolean;
+  /** Earlier-owner state of an unowned name. Null once the name has an owner. */
+  earlier: EarlierState | null;
   complete: Record<RegistrationStep, boolean>;
   /** Writes needed after preceding setup steps succeed, using this snapshot's records. */
   required: Record<RegistrationStep, boolean>;
 }
 
-export type RegistrationPlan = readonly { step: RegistrationStep; required: boolean }[];
+/** A clear entry carries the record version read when the claim was planned. */
+export type RegistrationPlan = readonly {
+  step: RegistrationStep;
+  required: boolean;
+  version?: string;
+}[];
 
-/** The ordered plan is shared by the approval count, progress display and executor. */
-export function registrationPlan(state: RegistrationState, primary: boolean): RegistrationPlan {
-  return registrationSteps
-    .filter((step) => step !== "primary" || primary)
-    .map((step) => ({ step, required: state.required[step] }));
+/** A clear decided when a claim was planned, saved so a resumed claim still runs it. */
+export interface PlannedClear {
+  version: string;
+}
+
+/**
+ * The ordered plan is shared by the approval count, progress display and executor. A clear is
+ * planned only for a claim of an unowned name, or carried from that claim's saved plan while
+ * the record version has not moved. A foreign resolver pointer is replaced before the address
+ * is written, so the name stops answering through it as early as possible.
+ */
+export function registrationPlan(
+  state: RegistrationState,
+  primary: boolean,
+  planned: PlannedClear | null = null,
+): RegistrationPlan {
+  const fresh = state.owner === null && state.earlier?.needsClear === true;
+  let version: string | undefined;
+  if (fresh) version = toQuantity(state.recordVersion);
+  else if (state.owner !== null && planned && state.recordVersion <= BigInt(planned.version))
+    version = planned.version;
+  const order: RegistrationStep[] = state.foreignResolver
+    ? ["register", "clear", "resolver", "address", "name", "primary"]
+    : ["register", "clear", "address", "resolver", "name", "primary"];
+  return order
+    .filter(
+      (step) => (step !== "primary" || primary) && (step !== "clear" || version !== undefined),
+    )
+    .map((step) =>
+      step === "clear" && version !== undefined
+        ? { step, required: true, version }
+        : {
+            step,
+            // A pending clear empties the address and name, so both are written again.
+            required:
+              state.required[step] ||
+              (version !== undefined && (step === "address" || step === "name")),
+          },
+    );
 }
 
 /** Read every postcondition at one block so recovery also works for replacement hashes. */
@@ -304,6 +394,14 @@ export async function readRegistrationState(
   const owner = await nameOwner(name, { ...context, provider });
   const registry = requireContract(context.config, "QNSRegistry");
   const records = await readNameRecords(node, { ...context, provider }, block);
+  const reads = {
+    config: context.config,
+    provider,
+    ...(context.history ? { history: context.history } : {}),
+  };
+  const recordVersion = await readRecordVersion(node, reads, block);
+  // Earlier-owner state only matters for a name that is unowned when the claim is planned.
+  const earlier = owner === null ? await readEarlierState(node, reads, block) : null;
   const { resolver, address, spelling } = records;
   const { primary, reverseName } = await readPrimaryState(account, registry, provider);
   const publicResolver = requireContract(context.config, "QRLPublicResolver");
@@ -313,23 +411,31 @@ export async function readRegistrationState(
       : await readResolverRecords(node, publicResolver, provider, block, false);
   const owned = owner === canonicalAddress(account);
   const selected = owned && records.resolverStatus === "usable" && resolver === publicResolver;
+  // The address may be written to the public resolver before the registry points at it.
+  const addressed = owned && destination.address === canonicalAddress(account);
   const forward = selected && address === canonicalAddress(account);
   await assertNetwork(context.provider, context.config);
   return {
     owner,
     ...records,
     primary,
+    recordVersion,
+    foreignResolver: resolver !== ZERO_ADDRESS && resolver !== publicResolver,
+    earlier,
     complete: {
       register: owned,
+      // A clear's completion comes from its receipt or a record-version read inside the claim.
+      clear: owned,
+      address: addressed,
       resolver: selected,
-      address: forward,
       name: forward && spelling === name,
       primary: forward && primary === name,
     },
     required: {
       register: !owned,
-      resolver: resolver !== publicResolver,
+      clear: owner === null && earlier?.needsClear === true,
       address: destination.address !== canonicalAddress(account),
+      resolver: resolver !== publicResolver,
       name: destination.spelling !== name,
       primary: !matchesStoredName(reverseName, name),
     },
@@ -675,7 +781,29 @@ export async function registerName(input: string, options: RegistrationOptions):
   const initial = await readRegistrationState(name, account, options);
   if (initial.owner !== null && initial.owner !== account)
     throw new Error("This name is already owned by another account");
-  const computed = registrationPlan(initial, options.primary);
+  // A resumed claim carries the clear its saved plan decided when the name was unowned.
+  const savedClear = options.plan?.find((entry) => entry.step === "clear")?.version;
+  // An unowned name's records cannot change until it is claimed, so a displayed plan keeps its
+  // clear when the log read fails now, and its earlier log read cannot be undone by a failure.
+  let planned = initial;
+  if (initial.owner === null && initial.earlier && options.plan) {
+    const { earlier } = initial;
+    const needsClear =
+      savedClear !== undefined ||
+      earlier.resolver !== ZERO_ADDRESS ||
+      earlier.records ||
+      earlier.logs === "writes";
+    planned = {
+      ...initial,
+      earlier: { ...earlier, needsClear },
+      required: { ...initial.required, clear: needsClear },
+    };
+  }
+  const computed = registrationPlan(
+    planned,
+    options.primary,
+    initial.owner === account && savedClear !== undefined ? { version: savedClear } : null,
+  );
   const plan = (options.plan ?? computed).map((entry) => ({ ...entry }));
   const changed = () =>
     new Error("Name records changed. Search again to review the remaining approvals.");
@@ -683,7 +811,9 @@ export async function registerName(input: string, options: RegistrationOptions):
     plan.length !== computed.length ||
     plan.some(
       (entry, index) =>
-        entry.step !== computed[index]?.step || entry.required !== computed[index].required,
+        entry.step !== computed[index]?.step ||
+        entry.required !== computed[index].required ||
+        entry.version !== computed[index].version,
     )
   )
     throw changed();
@@ -703,7 +833,7 @@ export async function registerName(input: string, options: RegistrationOptions):
       throw new Error("Name spelling verification failed");
   }
   // The snapshot fixes the plan. Live guards authorize each step and preserve prior records.
-  async function requiresWrite(step: RegistrationStep): Promise<boolean> {
+  async function requiresWrite(step: RegistrationStep, version?: string): Promise<boolean> {
     if (step === "register") {
       const owner = await nameOwner(name, options);
       if (owner !== null && owner !== account)
@@ -711,18 +841,24 @@ export async function registerName(input: string, options: RegistrationOptions):
       return owner === null;
     }
     await requireOwner();
-    const selected =
-      decodeAddress(
-        await call(options.provider, registry, "resolver(bytes32)", bytes32Word(node)),
-      ) === resolver;
-    if (step === "resolver") return !selected;
-    if (!selected) throw new IncompleteRegistrationError();
+    // The clear is still owed while the record version has not moved past the planned one.
+    if (step === "clear")
+      return (
+        version !== undefined &&
+        (await readRecordVersion(node, options, "latest")) <= BigInt(version)
+      );
     if (step === "address")
       return (
         decodeAddress(
           await call(options.provider, resolver, "addr(bytes32)", bytes32Word(node)),
         ) !== account
       );
+    const selected =
+      decodeAddress(
+        await call(options.provider, registry, "resolver(bytes32)", bytes32Word(node)),
+      ) === resolver;
+    if (step === "resolver") return !selected;
+    if (!selected) throw new IncompleteRegistrationError();
     const resolved = await resolveName(name, readConfig);
     if (resolved === null || canonicalAddress(resolved) !== account)
       throw new Error("Forward resolution is not confirmed. Check records before continuing.");
@@ -738,15 +874,17 @@ export async function registerName(input: string, options: RegistrationOptions):
       throw new IncompleteRegistrationError();
     return primaryState.primary !== name;
   }
-  for (const { step, required } of plan) {
+  for (const { step, required, version } of plan) {
     await assertSigner(options);
     const state = await readRegistrationState(name, account, options);
     if (step !== "register" && state.owner !== account)
       throw new Error("Name ownership changed. Check the name before continuing.");
     if (completed.some((previous) => !state.complete[previous]))
       throw new IncompleteRegistrationError();
-    if (state.required[step] !== required) throw changed();
-    if ((await requiresWrite(step)) !== required) throw changed();
+    // An owned name's state never asks for a clear; the planned version decides it. The clear
+    // runs right after register, so the address and name it empties read as required here.
+    if (step !== "clear" && state.required[step] !== required) throw changed();
+    if ((await requiresWrite(step, version)) !== required) throw changed();
     if (!required) {
       if (!state.complete[step]) throw new IncompleteRegistrationError();
       options.onUpdate({ step, status: "skipped" });

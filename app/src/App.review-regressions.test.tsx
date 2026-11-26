@@ -67,6 +67,7 @@ describe("adversarial resolver recovery", () => {
     await waitFor(() => {
       expect(chain.spellings.get(alice.node)).toBe(alice.name);
     });
+    // The foreign pointer is replaced before the address is written.
     expect(chain.sent.map((tx) => tx.data)).toEqual(
       (["resolver", "address", "name"] as const).map(
         (step) => registrationTransaction(alice.name, ACCOUNT, step, config).data,

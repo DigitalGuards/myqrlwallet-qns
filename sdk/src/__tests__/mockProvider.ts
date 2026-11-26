@@ -12,6 +12,15 @@ import { parseNetworkConfig } from "../config.js";
 import { namehash, nodeToHex } from "../namehash.js";
 import { registrationName } from "../registration.js";
 import { reverseNodeFor, type RpcProvider } from "../resolver.js";
+import { keccak_256 } from "@noble/hashes/sha3";
+
+function subnodeOf(parent: string, label: string): string {
+  const hex = parent.slice(2) + label.slice(2);
+  const bytes = new Uint8Array(64);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return nodeToHex(keccak_256(bytes));
+}
+
 export const ACCOUNT = `Q${"a".repeat(128)}`;
 export const OTHER = `Q${"b".repeat(128)}`;
 export const config = parseNetworkConfig({
@@ -57,6 +66,9 @@ export class MockChain implements RpcProvider {
   owners = new Map<string, string>();
   resolvers = new Map<string, string>();
   addresses = new Map<string, string>();
+  contenthashes = new Map<string, string>();
+  /** Public resolver record versions per node; clearRecords increments them. */
+  versions = new Map<string, bigint>();
   primary = "";
   spellings = new Map<string, string>();
   nameLogs: unknown[] = [];
@@ -104,6 +116,28 @@ export class MockChain implements RpcProvider {
     );
   }
 
+  /** An earlier owner's setup: public resolver pointer, address, spelling and content hash. */
+  seedEarlierOwner(name: string, owner: string): void {
+    const entry = registrationName(name);
+    this.seed(entry.name, owner);
+    this.resolvers.set(entry.node, config.contracts.QRLPublicResolver ?? ZERO_ADDRESS);
+    this.registryLog(
+      "NewResolver(bytes32,address)",
+      [`0x${bytes32Word(entry.node)}`],
+      `0x${addressWord(config.contracts.QRLPublicResolver ?? ZERO_ADDRESS)}`,
+    );
+    this.addresses.set(entry.node, owner);
+    this.resolverLog("AddrChanged(bytes32,address)", entry.node, `0x${addressWord(owner)}`);
+    this.spellings.set(entry.node, entry.name);
+    this.resolverLog("NameChanged(bytes32,string)", entry.node, `0x${stringArgument(entry.name)}`);
+    this.contenthashes.set(entry.node, "e301");
+    this.resolverLog(
+      "ContenthashChanged(bytes32,bytes)",
+      entry.node,
+      `0x${uintWord(64n)}${uintWord(2n)}${"e301".padEnd(128, "0")}`,
+    );
+  }
+
   /** The current owner hands the name to another account, as QNSRegistry.setOwner does. */
   transfer(name: string, owner: string): void {
     const entry = registrationName(name);
@@ -126,6 +160,17 @@ export class MockChain implements RpcProvider {
     );
   }
 
+  /** A subname of `name` created by its current owner. */
+  seedSubname(name: string, label: string, owner: string): void {
+    const parent = registrationName(name).node;
+    const labelHash = hashText(label);
+    this.owners.set(subnodeOf(parent, labelHash), owner);
+    this.registryLog(
+      "NewOwner(bytes32,bytes32,address)",
+      [`0x${bytes32Word(parent)}`, `0x${bytes32Word(labelHash)}`],
+      `0x${addressWord(owner)}`,
+    );
+  }
   private mutate(tx: SentTransaction): void {
     const sig = tx.data.slice(0, 10);
     const node = tx.data.slice(10, 74);
@@ -144,6 +189,13 @@ export class MockChain implements RpcProvider {
     } else if (sig === selector("setAddr(bytes32,address)")) {
       this.addresses.set(`0x${node}`, address);
       this.resolverLog("AddrChanged(bytes32,address)", `0x${node}`, `0x${addressWord(address)}`);
+    } else if (sig === selector("clearRecords(bytes32)")) {
+      this.addresses.delete(`0x${node}`);
+      this.spellings.delete(`0x${node}`);
+      this.contenthashes.delete(`0x${node}`);
+      const version = (this.versions.get(`0x${node}`) ?? 0n) + 1n;
+      this.versions.set(`0x${node}`, version);
+      this.resolverLog("VersionChanged(bytes32,uint64)", `0x${node}`, `0x${uintWord(version)}`);
     } else if (sig === selector("setName(string)")) {
       const length = Number(BigInt(`0x${tx.data.slice(138, 266)}`));
       const bytes = new Uint8Array(length);
@@ -294,6 +346,12 @@ export class MockChain implements RpcProvider {
       return `0x${uintWord(this.owners.has(this.labels.get(node) ?? "") ? 0n : 1n)}`;
     if (sig === selector("resolver(bytes32)")) return address(this.resolvers.get(node));
     if (sig === selector("addr(bytes32)")) return address(this.addresses.get(node));
+    if (sig === selector("recordVersions(bytes32)"))
+      return `0x${uintWord(this.versions.get(node) ?? 0n)}`;
+    if (sig === selector("contenthash(bytes32)")) {
+      const hash = this.contenthashes.get(node) ?? "";
+      return `0x${uintWord(64n)}${uintWord(BigInt(hash.length / 2))}${hash.padEnd(Math.ceil(hash.length / 128) * 128, "0")}`;
+    }
     if (sig === selector("name(bytes32)"))
       return `0x${stringArgument(node === reverseNodeFor(ACCOUNT) ? this.primary : (this.spellings.get(node) ?? ""))}`;
     throw new Error(`Unexpected call: ${sig}`);

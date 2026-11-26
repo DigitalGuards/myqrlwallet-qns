@@ -20,7 +20,14 @@ import {
 
 const hash = `0x${"d".repeat(64)}`;
 const otherHash = `0x${"e".repeat(64)}`;
-const complete = { register: true, resolver: true, address: true, name: true, primary: true };
+const complete = {
+  register: true,
+  clear: true,
+  address: true,
+  resolver: true,
+  name: true,
+  primary: true,
+};
 const readyRecords: RecoveryRecords = { status: "read", state: { complete } };
 const unavailable: RecoveryRecords = {
   status: "error",
@@ -163,7 +170,10 @@ it.each(recoveryCases)(
           ]);
         if (showFinished)
           expect(decision.updates).toEqual(
-            Object.keys(complete).map((step) => ({ step, status: "skipped" })),
+            // A clear is never reported as skipped by recovery.
+            Object.keys(complete)
+              .filter((step) => step !== "clear")
+              .map((step) => ({ step, status: "skipped" })),
           );
         saved = persist(decision.pending, reload);
         if (reload && saved) {
@@ -296,4 +306,15 @@ it("preserves saved recovery on a check error and clears stale messages once a c
   const failedRead = decideRecovery(saved, evidence(checked("pending"), false), false, unavailable);
   expect(failedRead.pending?.update).toEqual(claim().update);
   expect(failedRead.message).toBe(unavailable.message);
+});
+
+it("never adds a skipped clear row for a recovered claim without one", () => {
+  const records: RecoveryRecords = { status: "read", state: { complete } };
+  const decision = decideRecovery(
+    { ...claim(), update: { step: "name", status: "confirmed" } },
+    evidence(null, false),
+    true,
+    records,
+  );
+  expect(decision.updates.some((update) => update.step === "clear")).toBe(false);
 });

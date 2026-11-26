@@ -90,7 +90,9 @@ it.each([false, true])("preserves the approval count (primary=%s)", async (prima
 });
 
 const answers: TransactionStatus[] = ["confirmed", "failed"];
-it.each(claimSteps.flatMap((step) => answers.map((answer) => ({ step, answer }))))(
+// A clear appears only in plans that carry one; its own test is below.
+const settledSteps = claimSteps.filter((step) => step !== "clear");
+it.each(settledSteps.flatMap((step) => answers.map((answer) => ({ step, answer }))))(
   "keeps $step approval ahead of a complete snapshot and reconciles after $answer",
   async ({ step, answer }) => {
     const chain = new MockChain();
@@ -157,7 +159,7 @@ it.each(claimSteps.flatMap((step) => answers.map((answer) => ({ step, answer }))
 
 const unsettled: TransactionStatus[] = ["pending", "unconfirmed", "failed"];
 it.each(
-  claimSteps.flatMap((step) =>
+  settledSteps.flatMap((step) =>
     unsettled.flatMap((status) => [false, true].map((running) => ({ step, status, running }))),
   ),
 )(
@@ -368,4 +370,26 @@ it("keeps future required rows waiting when a running plan receives a complete s
   expect(screen.getByRole("status").textContent).toBe(
     "Claiming alice.qrl: 2 of 5 steps done, approve in your wallet now.",
   );
+});
+
+it("shows a clear row for a resumed claim only when its saved plan carries one", async () => {
+  const chain = new MockChain();
+  const name = registrationName("alice");
+  chain.seed(name.name, ACCOUNT);
+  const state = await readRegistrationState(name.name, ACCOUNT, { config, provider: chain });
+  const props = { name: name.name, config, primary: false, state, running: false, updates: [] };
+  const view = render(<ClaimProgress {...props} plannedClear={{ version: "0x0" }} />);
+  const titles = () =>
+    within(screen.getByRole("list", { name: "Claim steps" }))
+      .getAllByRole("heading")
+      .map((heading) => heading.textContent);
+  expect(titles()).toEqual([
+    "Claim the name",
+    "Clear earlier records",
+    "Point the name to your address",
+    "Choose where records live",
+    "Store the name text",
+  ]);
+  view.rerender(<ClaimProgress {...props} plannedClear={null} />);
+  expect(titles()).not.toContain("Clear earlier records");
 });

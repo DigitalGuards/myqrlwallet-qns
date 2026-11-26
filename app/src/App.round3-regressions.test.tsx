@@ -6,6 +6,7 @@ import {
   reverseNodeFor,
   readRegistrationState,
   verifyReverse,
+  registrationPlan,
 } from "@qns/sdk";
 import { isRecord, selector } from "../../sdk/src/abi";
 import { ACCOUNT, OTHER, config, MockChain } from "../../sdk/src/__tests__/mockProvider";
@@ -64,30 +65,33 @@ function seedReady(chain: MockChain, spelling = "alice", primary = false) {
 it("advertises the actual writes for a released name with retained records", async () => {
   const chain = new MockChain();
   const alice = seedReady(chain);
-  // QNSRegistry.setOwner(node, zero) retains resolver, address and spelling records.
+  // QNSRegistry.setOwner(node, zero) retains resolver, address and spelling records. On an
+  // unowned name every retained record is cleared, then the address and name are written.
   chain.owners.delete(alice.node);
-  const required = await readRegistrationState(alice.name, ACCOUNT, { config, provider: chain });
+  const state = await readRegistrationState(alice.name, ACCOUNT, { config, provider: chain });
   expect(
-    Object.entries(required.required)
-      .filter(([step, needed]) => step !== "primary" && needed)
-      .map(([step]) => step),
-  ).toEqual(["register"]);
+    registrationPlan(state, false)
+      .filter((entry) => entry.required)
+      .map((entry) => entry.step),
+  ).toEqual(["register", "clear", "address", "name"]);
   await mount(chain);
   await searchName(alice.name);
   await screen.findByText("Available", { selector: "dd" });
   const steps = within(screen.getByRole("list", { name: "Claim steps" }));
-  expect(steps.getAllByText("Skipped", { selector: "dd" })).toHaveLength(3);
-  expect(steps.getAllByText("Waiting", { selector: "dd" })).toHaveLength(1);
+  expect(steps.getAllByText("Skipped", { selector: "dd" })).toHaveLength(1);
+  expect(steps.getAllByText("Waiting", { selector: "dd" })).toHaveLength(4);
   const advertised = screen.getByText("Wallet approvals").nextElementSibling?.textContent;
   const summary = screen.getByText(/^Set up alice.qrl:/).textContent;
   fireEvent.click(screen.getByRole("button", { name: "Claim name" }));
   await screen.findByText("alice.qrl is ready. It resolves to your address.");
-  expect(chain.sent.map((tx) => tx.data)).toEqual([
-    registrationTransaction(alice.name, ACCOUNT, "register", config).data,
-  ]);
+  expect(chain.sent.map((tx) => tx.data)).toEqual(
+    (["register", "clear", "address", "name"] as const).map(
+      (step) => registrationTransaction(alice.name, ACCOUNT, step, config).data,
+    ),
+  );
   expect({ advertised, summary }).toEqual({
-    advertised: "1 remaining",
-    summary: "Set up alice.qrl: 1 wallet approvals remaining.",
+    advertised: "4 remaining",
+    summary: "Set up alice.qrl: 4 wallet approvals remaining.",
   });
 });
 

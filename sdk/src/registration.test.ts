@@ -158,14 +158,14 @@ describe("claim flow", () => {
         selector("register(bytes32,address)") + bytes32Word(labelHash) + addressWord(ACCOUNT),
       ],
       [
+        config.contracts.QRLPublicResolver,
+        selector("setAddr(bytes32,address)") + bytes32Word(node) + addressWord(ACCOUNT),
+      ],
+      [
         config.contracts.QNSRegistry,
         selector("setResolver(bytes32,address)") +
           bytes32Word(node) +
           addressWord(config.contracts.QRLPublicResolver ?? ""),
-      ],
-      [
-        config.contracts.QRLPublicResolver,
-        selector("setAddr(bytes32,address)") + bytes32Word(node) + addressWord(ACCOUNT),
       ],
       [
         config.contracts.QRLPublicResolver,
@@ -188,16 +188,16 @@ describe("claim flow", () => {
       "register:pending",
       "register:verifying",
       "register:confirmed",
-      "resolver:approval",
-      "resolver:pending",
-      "resolver:pending",
-      "resolver:verifying",
-      "resolver:confirmed",
       "address:approval",
       "address:pending",
       "address:pending",
       "address:verifying",
       "address:confirmed",
+      "resolver:approval",
+      "resolver:pending",
+      "resolver:pending",
+      "resolver:verifying",
+      "resolver:confirmed",
       "name:approval",
       "name:pending",
       "name:pending",
@@ -205,11 +205,12 @@ describe("claim flow", () => {
       "name:confirmed",
     ]);
     expect(states.map((state) => state.owner)).toEqual([ACCOUNT, ACCOUNT, ACCOUNT, ACCOUNT]);
+    // register, clear, address, resolver, name, primary
     expect(states.map((state) => Object.values(state.complete))).toEqual([
-      [true, false, false, false, false],
-      [true, true, false, false, false],
-      [true, true, true, false, false],
-      [true, true, true, true, false],
+      [true, true, false, false, false, false],
+      [true, true, true, false, false, false],
+      [true, true, true, true, false, false],
+      [true, true, true, true, true, false],
     ]);
   });
   it("adds a reverse write with 64-byte dynamic ABI offsets for relay wallets", async () => {
@@ -225,7 +226,7 @@ describe("claim flow", () => {
     provider.rejectSend = 2;
     await expect(registerName("alice", options)).rejects.toThrow("rejected");
     expect(provider.sent).toHaveLength(1);
-    expect(updates.at(-1)).toMatchObject({ step: "resolver", status: "failed" });
+    expect(updates.at(-1)).toMatchObject({ step: "address", status: "failed" });
     provider.rejectSend = 0;
     await registerName("alice", options);
     expect(provider.sent).toHaveLength(4);

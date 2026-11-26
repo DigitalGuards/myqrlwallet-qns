@@ -25,6 +25,7 @@ export {
   nameOwner,
   assertDeployment,
   registerName,
+  readNameLeftovers,
   waitForReceipt,
   PendingTransactionError,
   RevertedTransactionError,
@@ -37,9 +38,12 @@ export type {
   RegistrationOptions,
   RegistrationStep,
   RegistrationPlan,
+  PlannedClear,
   TransactionStatus,
   TransactionUpdate,
 } from "./registration.js";
+export { NameHistoryCache } from "./earlier.js";
+export type { EarlierState } from "./earlier.js";
 export { listOwnedNames, OWNED_NAME_CHECKS } from "./owned.js";
 export type { OwnedName, OwnedNameOptions } from "./owned.js";
 export {

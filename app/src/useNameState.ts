@@ -3,9 +3,12 @@ import {
   assertNetwork,
   isAvailable,
   isDeployed,
+  NameHistoryCache,
   nameOwner,
+  readNameLeftovers,
   readRegistrationState,
   registrationName,
+  type EarlierState,
   type NetworkConfig,
   type RegistrationState,
   type RpcProvider,
@@ -20,6 +23,8 @@ export interface NameResult {
   available: boolean;
   owner: string | null;
   setup: RegistrationState | null;
+  /** What an earlier owner left on an unowned name, read without a connected account too. */
+  leftovers: EarlierState | null;
 }
 
 /** All displayed ownership comes from refreshName, including recovery and wallet changes. */
@@ -33,6 +38,8 @@ export function useNameState(
     () => ({ config, provider, controller, revision }),
     [config, provider, controller, revision],
   );
+  // Scanned name history is shared by searches on the same network and provider.
+  const history = useMemo(() => new NameHistoryCache(), [config, provider]);
   const active = useRef(context);
   active.current = context;
   const mounted = useRef(true);
@@ -103,7 +110,14 @@ export function useNameState(
         const account = controller.getSnapshot().account;
         const setup =
           account !== null && (owner === null || owner === account)
-            ? await readRegistrationState(name, account, { config, provider: snapshot })
+            ? await readRegistrationState(name, account, { config, provider: snapshot, history })
+            : null;
+        // The line is advisory: a failed read hides it, and the claim plan reads on its own.
+        const leftovers =
+          owner === null
+            ? await readNameLeftovers(name, { config, provider: snapshot, history }, block).catch(
+                () => null,
+              )
             : null;
         await assertNetwork(provider, config);
         if (!current()) return null;
@@ -114,6 +128,7 @@ export function useNameState(
           available: available && owner === null,
           owner,
           setup,
+          leftovers,
         };
         setState({ context, result, error: null, readErrorName: null, loading: false });
         return result;
@@ -129,7 +144,7 @@ export function useNameState(
         return null;
       }
     },
-    [config, provider, controller, revision, context],
+    [config, provider, controller, revision, context, history],
   );
 
   useEffect(() => {
@@ -149,5 +164,6 @@ export function useNameState(
     searching: visible && state.loading,
     refreshName,
     getSelection,
+    history,
   };
 }

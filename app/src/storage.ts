@@ -1,7 +1,9 @@
 import {
   canonicalAddress,
   registrationName,
+  registrationSteps,
   type NetworkConfig,
+  type PlannedClear,
   type TransactionUpdate,
   type TransactionStatus,
 } from "@qns/sdk";
@@ -82,12 +84,9 @@ export function readPendingClaim(
       return null;
     if (canonicalAddress(value.account) !== canonicalAddress(account)) return null;
     const { step, hash, nonce, requestId, status: savedStatus } = value.update;
+    const knownStep = registrationSteps.find((item) => item === step);
     if (
-      (step !== "register" &&
-        step !== "resolver" &&
-        step !== "address" &&
-        step !== "name" &&
-        step !== "primary") ||
+      knownStep === undefined ||
       (hash !== undefined && (typeof hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hash)))
     )
       return null;
@@ -111,7 +110,7 @@ export function readPendingClaim(
         ? { trackedHash: value.trackedHash }
         : {}),
       update: {
-        step,
+        step: knownStep,
         ...(typeof hash === "string" ? { hash } : {}),
         ...(typeof nonce === "string" ? { nonce } : {}),
         ...(typeof requestId === "string" || typeof requestId === "number" ? { requestId } : {}),
@@ -140,5 +139,67 @@ export function savePendingClaim(
       localStorage.removeItem(key(config, "pending"));
   } catch {
     /* The visible transaction link remains available for this session. */
+  }
+}
+
+function clearKey(config: NetworkConfig, account: string): string {
+  return `${key(config, "clear")}:${config.genesisHash ?? config.rpcUrl}:${canonicalAddress(account)}`;
+}
+
+function plannedClears(config: NetworkConfig, account: string): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(clearKey(config, account)) ?? "{}");
+    if (!isRecord(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string] =>
+          /^0x[0-9a-f]{64}$/.test(entry[0]) &&
+          typeof entry[1] === "string" &&
+          /^0x(?:0|[1-9a-f][0-9a-f]*)$/.test(entry[1]),
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The clear a claim of an unowned name planned, with the record version read at that time.
+ * A resumed claim by the same account carries it; without storage a resumed claim has no clear.
+ */
+export function plannedClear(
+  config: NetworkConfig,
+  account: string,
+  node: string,
+): PlannedClear | null {
+  const version = plannedClears(config, account)[node];
+  return version === undefined ? null : { version };
+}
+
+export function savePlannedClear(
+  config: NetworkConfig,
+  account: string,
+  node: string,
+  version: string,
+): void {
+  try {
+    localStorage.setItem(
+      clearKey(config, account),
+      JSON.stringify({ ...plannedClears(config, account), [node]: version }),
+    );
+  } catch {
+    /* Without storage a resumed claim plans no clear. */
+  }
+}
+
+export function dropPlannedClear(config: NetworkConfig, account: string, node: string): void {
+  try {
+    const rest = Object.fromEntries(
+      Object.entries(plannedClears(config, account)).filter(([saved]) => saved !== node),
+    );
+    if (Object.keys(rest).length === 0) localStorage.removeItem(clearKey(config, account));
+    else localStorage.setItem(clearKey(config, account), JSON.stringify(rest));
+  } catch {
+    /* Nothing to remove when storage is disabled. */
   }
 }

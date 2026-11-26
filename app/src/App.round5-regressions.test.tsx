@@ -402,7 +402,7 @@ it("counts each wallet approval through the frozen plan and returns to the searc
   });
   expect(screen.getByText("Wallet approvals").nextElementSibling?.textContent).toBe("1 remaining");
   expect(chain.sent.map((tx) => tx.data)).toEqual(
-    (["register", "resolver", "address", "name"] as const).map(
+    (["register", "address", "resolver", "name"] as const).map(
       (step) => registrationTransaction("alice", ACCOUNT, step, config).data,
     ),
   );
