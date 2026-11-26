@@ -65,16 +65,17 @@ function subnode(parent: string, label: string): string {
 export const OWNED_NAME_CHECKS = 500;
 
 /**
- * Hints without an ownership log that are checked before the log matches. A hint can be owned
- * without a log only while a log endpoint catches up with a just-confirmed claim, so a few of
- * the newest are enough; the remaining ones are checked after the log matches.
+ * Hints with no ownership log, or whose last log is a release, that are checked before the log
+ * matches. Such a hint can be owned only while a log endpoint catches up with a just-confirmed
+ * claim, so a few of the newest are enough. The remaining ones come after the log matches and
+ * can go unchecked when the account's own names reach the limit.
  */
 export const LOGLESS_HINT_CHECKS = 25;
 
 export interface OwnedNameOptions {
   /** Most candidates verified with an owner() call; see the candidate order in listOwnedNames. */
   limit?: number;
-  /** Called with the number of candidates left unchecked when the limit is reached. */
+  /** Called with the number of names from the account's ownership logs left unchecked at the limit. */
   onUnchecked?: (count: number) => void;
 }
 
@@ -268,7 +269,12 @@ export async function listOwnedNames(
   }
   for (const [node, labelHash] of later.slice(logless)) candidates.set(node, labelHash);
   const checked = [...candidates].slice(0, limit);
-  if (candidates.size > checked.length) options.onUnchecked?.(candidates.size - checked.length);
+  // Reported: the unchecked names whose last ownership log names the account. Unchecked hints
+  // without such a log are searched spellings and are left out of the count.
+  const unchecked = [...candidates.keys()]
+    .slice(limit)
+    .filter((node) => last.get(node)?.owner === owner).length;
+  if (unchecked > 0) options.onUnchecked?.(unchecked);
   const result: OwnedName[] = [];
   for (const [node, labelHash] of checked) {
     signal?.throwIfAborted();
