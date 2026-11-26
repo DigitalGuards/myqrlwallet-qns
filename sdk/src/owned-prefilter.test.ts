@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bytes32Word, hashText, isRecord, selector, stringArgument } from "./abi.js";
 import { namehash, nodeToHex } from "./namehash.js";
-import { listOwnedNames } from "./owned.js";
+import { LOGLESS_HINT_CHECKS, listOwnedNames } from "./owned.js";
 import { registrationName } from "./registration.js";
 import { ACCOUNT, OTHER, config, MockChain } from "./__tests__/mockProvider.js";
 
@@ -120,6 +120,37 @@ describe("owned names pre-filtered on log data", () => {
     expect(names.map((item) => item.node).sort()).toEqual(
       ["saved", "n0", "n5"].map((name) => registrationName(name).node).sort(),
     );
+  });
+
+  it("keeps owned names inside the bound when many searched names were never registered", async () => {
+    const chain = new MockChain();
+    for (let i = 0; i < 5; i++) chain.seed(`mine${String(i)}`, ACCOUNT);
+    // Saved spellings from searches: none of them was ever registered.
+    const searched = Array.from({ length: 60 }, (_, i) => `searched${String(i)}`);
+    const unchecked: number[] = [];
+    const names = await listOwnedNames(ACCOUNT, { config, provider: chain }, searched, undefined, {
+      limit: LOGLESS_HINT_CHECKS + 5,
+      onUnchecked: (count) => unchecked.push(count),
+    });
+    expect(names.map((item) => item.node).sort()).toEqual(
+      [0, 1, 2, 3, 4].map((i) => registrationName(`mine${String(i)}`).node).sort(),
+    );
+    // The newest searched names are still checked first, the remaining ones are left out.
+    const checked = new Set(ownerChecks(chain));
+    expect(checked.has(registrationName("searched59").node)).toBe(true);
+    expect(checked.has(registrationName("searched0").node)).toBe(false);
+    expect(unchecked).toEqual([60 - LOGLESS_HINT_CHECKS]);
+  });
+
+  it("checks a just-confirmed name whose ownership log is not visible yet", async () => {
+    const chain = new MockChain();
+    for (let i = 0; i < 5; i++) chain.seed(`mine${String(i)}`, ACCOUNT);
+    // Owned on chain, but the log endpoint has not served its NewOwner log.
+    chain.owners.set(registrationName("fresh").node, ACCOUNT);
+    const names = await listOwnedNames(ACCOUNT, { config, provider: chain }, ["fresh"], undefined, {
+      limit: 3,
+    });
+    expect(names.map((item) => item.node)).toContain(registrationName("fresh").node);
   });
 
   it("orders NewOwner and Transfer logs by chain position", async () => {
