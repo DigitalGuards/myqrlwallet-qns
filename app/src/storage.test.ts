@@ -1,6 +1,6 @@
 import { beforeEach, expect, it } from "vitest";
 import { ACCOUNT, OTHER, config } from "../../sdk/src/__tests__/mockProvider";
-import { readPendingClaim, savePendingClaim } from "./storage";
+import { knownNames, readPendingClaim, rememberName, savePendingClaim } from "./storage";
 
 beforeEach(() => {
   localStorage.clear();
@@ -67,4 +67,10 @@ it.each([false, true])("stores tracking independently of a submitted hash (known
   expect(readPendingClaim(config, ACCOUNT)?.attemptId).toBe(pending.attemptId);
   savePendingClaim(config, { ...pending, trackedHash: "invalid" });
   expect(readPendingClaim(config, ACCOUNT)).toEqual(pending);
+});
+
+it("moves a name that is saved again to the newest position", () => {
+  for (const name of ["first.qrl", "second.qrl", "third.qrl"]) rememberName(config, name);
+  rememberName(config, "first.qrl");
+  expect(knownNames(config)).toEqual(["second.qrl", "third.qrl", "first.qrl"]);
 });

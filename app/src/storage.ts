@@ -23,11 +23,11 @@ export function knownNames(config: NetworkConfig): string[] {
 
 export function rememberName(config: NetworkConfig, name: string): void {
   try {
+    // The newest name goes last, also when it was saved before: My names checks the newest first.
+    const saved = registrationName(name).name;
     localStorage.setItem(
       key(config, "names"),
-      JSON.stringify(
-        [...new Set([...knownNames(config), registrationName(name).name])].slice(-1000),
-      ),
+      JSON.stringify([...knownNames(config).filter((item) => item !== saved), saved].slice(-1000)),
     );
   } catch {
     /* Ownership remains available from chain logs when storage is disabled. */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bytes32Word, hashText, isRecord, selector, stringArgument } from "./abi.js";
 import { namehash, nodeToHex } from "./namehash.js";
-import { listOwnedNames } from "./owned.js";
+import { LOGLESS_HINT_CHECKS, listOwnedNames } from "./owned.js";
 import { registrationName } from "./registration.js";
 import { ACCOUNT, OTHER, config, MockChain } from "./__tests__/mockProvider.js";
 
@@ -120,6 +120,63 @@ describe("owned names pre-filtered on log data", () => {
     expect(names.map((item) => item.node).sort()).toEqual(
       ["saved", "n0", "n5"].map((name) => registrationName(name).node).sort(),
     );
+  });
+
+  it("keeps owned names inside the bound when many searched names were never registered", async () => {
+    const chain = new MockChain();
+    for (let i = 0; i < 5; i++) chain.seed(`mine${String(i)}`, ACCOUNT);
+    chain.seed("theirs", OTHER);
+    chain.seed("dropped", ACCOUNT);
+    chain.release("dropped");
+    // Saved spellings from searches, oldest first: an owned name, a name of another account, a
+    // released name, then 60 names that were never registered.
+    const searched = [
+      "mine0",
+      "theirs",
+      "dropped",
+      ...Array.from({ length: 60 }, (_, i) => `searched${String(i)}`),
+    ];
+    const unchecked: number[] = [];
+    const names = await listOwnedNames(ACCOUNT, { config, provider: chain }, searched, undefined, {
+      limit: LOGLESS_HINT_CHECKS + 5,
+      onUnchecked: (count) => unchecked.push(count),
+    });
+    expect(names.map((item) => item.node).sort()).toEqual(
+      [0, 1, 2, 3, 4].map((i) => registrationName(`mine${String(i)}`).node).sort(),
+    );
+    // Checked: the owned hint, the 25 newest hints without an owner in the logs, the log matches.
+    const expected = [
+      ...[0, 1, 2, 3, 4].map((i) => `mine${String(i)}`),
+      ...Array.from({ length: LOGLESS_HINT_CHECKS }, (_, i) => `searched${String(59 - i)}`),
+    ].map((name) => registrationName(name).node);
+    expect([...new Set(ownerChecks(chain))].sort()).toEqual(expected.sort());
+    // The owned hint is checked first, before any searched spelling.
+    expect(ownerChecks(chain)[0]).toBe(registrationName("mine0").node);
+    // Unchecked searched spellings are no names from the account's history.
+    expect(unchecked).toEqual([]);
+  });
+
+  it("reports only names from the account's ownership logs as unchecked", async () => {
+    const chain = new MockChain();
+    for (let i = 0; i < 8; i++) chain.seed(`mine${String(i)}`, ACCOUNT);
+    const searched = Array.from({ length: 40 }, (_, i) => `searched${String(i)}`);
+    const unchecked: number[] = [];
+    await listOwnedNames(ACCOUNT, { config, provider: chain }, searched, undefined, {
+      limit: LOGLESS_HINT_CHECKS + 5,
+      onUnchecked: (count) => unchecked.push(count),
+    });
+    expect(unchecked).toEqual([3]);
+  });
+
+  it("checks a just-confirmed name whose ownership log is not visible yet", async () => {
+    const chain = new MockChain();
+    for (let i = 0; i < 5; i++) chain.seed(`mine${String(i)}`, ACCOUNT);
+    // Owned on chain, but the log endpoint has not served its NewOwner log.
+    chain.owners.set(registrationName("fresh").node, ACCOUNT);
+    const names = await listOwnedNames(ACCOUNT, { config, provider: chain }, ["fresh"], undefined, {
+      limit: 3,
+    });
+    expect(names.map((item) => item.node)).toContain(registrationName("fresh").node);
   });
 
   it("orders NewOwner and Transfer logs by chain position", async () => {

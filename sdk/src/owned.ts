@@ -64,10 +64,18 @@ function subnode(parent: string, label: string): string {
 /** Owner checks per listing. Candidates past the limit are reported through onUnchecked. */
 export const OWNED_NAME_CHECKS = 500;
 
+/**
+ * Hints with no ownership log, or whose last log is a release, that are checked before the log
+ * matches. Such a hint can be owned only while a log endpoint catches up with a just-confirmed
+ * claim, so a few of the newest are enough. The remaining ones come after the log matches and
+ * can go unchecked when the account's own names reach the limit.
+ */
+export const LOGLESS_HINT_CHECKS = 25;
+
 export interface OwnedNameOptions {
-  /** Most candidates verified with an owner() call; hints are checked before log matches. */
+  /** Most candidates verified with an owner() call; see the candidate order in listOwnedNames. */
   limit?: number;
-  /** Called with the number of candidates left unchecked when the limit is reached. */
+  /** Called with the number of names from the account's ownership logs left unchecked at the limit. */
   onUnchecked?: (count: number) => void;
 }
 
@@ -229,12 +237,29 @@ export async function listOwnedNames(
       // Name records are public input. Only normalized hash-matching spellings are hints.
     }
   }
-  // Saved and primary-name hints come first: they also cover a just-confirmed name while a
-  // log endpoint catches up. Then the names whose last ownership log names the account,
-  // newest first. Published spellings only label results.
+  // Candidate order. A name whose last ownership log names another account is not checked.
+  //   1. Hints (primary name first, then saved names newest first) whose last ownership log
+  //      names the account.
+  //   2. A few of the newest hints with no such log: they cover a just-confirmed name while a
+  //      log endpoint catches up. Saved names are every spelling the user searched, so the
+  //      rest of them must not use up the bound before the log matches.
+  //   3. The names whose last ownership log names the account, newest first.
+  //   4. The remaining hints.
+  // Published spellings only label results.
   const unowned = (holder: string) => holder === ZERO_ADDRESS || holder === registry;
   const candidates = new Map<string, string>();
-  for (const [node, labelHash] of hints) candidates.set(node, labelHash);
+  const later: [string, string][] = [];
+  let logless = 0;
+  for (const [node, labelHash] of hints) {
+    const change = last.get(node);
+    if (change?.owner === owner) candidates.set(node, labelHash);
+    else if (change && !unowned(change.owner)) continue;
+    else {
+      if (logless < LOGLESS_HINT_CHECKS) logless++;
+      later.push([node, labelHash]);
+    }
+  }
+  for (const [node, labelHash] of later.slice(0, logless)) candidates.set(node, labelHash);
   const matched = [...last]
     .filter(([node, change]) => change.owner === owner && labels.has(node))
     .sort(([, a], [, b]) => b.at - a.at);
@@ -242,13 +267,14 @@ export async function listOwnedNames(
     const labelHash = labels.get(node);
     if (labelHash !== undefined && !candidates.has(node)) candidates.set(node, labelHash);
   }
-  // A name whose last ownership log names another account is not checked.
-  for (const node of [...candidates.keys()]) {
-    const change = last.get(node);
-    if (change && change.owner !== owner && !unowned(change.owner)) candidates.delete(node);
-  }
+  for (const [node, labelHash] of later.slice(logless)) candidates.set(node, labelHash);
   const checked = [...candidates].slice(0, limit);
-  if (candidates.size > checked.length) options.onUnchecked?.(candidates.size - checked.length);
+  // Reported: the unchecked names whose last ownership log names the account. Unchecked hints
+  // without such a log are searched spellings and are left out of the count.
+  const unchecked = [...candidates.keys()]
+    .slice(limit)
+    .filter((node) => last.get(node)?.owner === owner).length;
+  if (unchecked > 0) options.onUnchecked?.(unchecked);
   const result: OwnedName[] = [];
   for (const [node, labelHash] of checked) {
     signal?.throwIfAborted();
