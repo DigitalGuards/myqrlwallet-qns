@@ -82,7 +82,7 @@ describe("deployment block validation", () => {
 });
 
 class PagedChain extends MockChain {
-  pages: { address: unknown; from: bigint; to: bigint }[] = [];
+  pages: { address: unknown; topic: unknown; from: bigint; to: bigint }[] = [];
   attempts = 0;
   head = 4103n;
   limit = 2000n;
@@ -105,7 +105,13 @@ class PagedChain extends MockChain {
         this.onRefusal?.();
         return Promise.reject(Object.assign(new Error(this.message), { code: -32602 }));
       }
-      this.pages.push({ address: filter.address, from, to });
+      const topics: unknown = filter.topics;
+      this.pages.push({
+        address: filter.address,
+        topic: Array.isArray(topics) ? topics[0] : undefined,
+        from,
+        to,
+      });
       // Only the final page has a registration and published spelling.
       if (to !== this.head) return Promise.resolve([]);
     }
@@ -179,9 +185,16 @@ describe("owned-name log ranges", () => {
       expect(await listOwnedNames(ACCOUNT, { config: network, provider: chain })).toMatchObject([
         { name: parsed.name, node: parsed.node, labelHash: parsed.labelHash },
       ]);
-      for (const address of [config.contracts.QNSRegistry, config.contracts.QRLPublicResolver]) {
+      const topic = (signature: string) => `0x${bytes32Word(hashText(signature))}`;
+      for (const [address, signature] of [
+        [config.contracts.QNSRegistry, "NewOwner(bytes32,bytes32,address)"],
+        [config.contracts.QRLPublicResolver, "NameChanged(bytes32,string)"],
+        [config.contracts.QNSRegistry, "Transfer(bytes32,address)"],
+      ] as const) {
         let next = BigInt(network.deploymentBlock ?? 1);
-        for (const page of chain.pages.filter((item) => item.address === address)) {
+        for (const page of chain.pages.filter(
+          (item) => item.address === address && item.topic === topic(signature),
+        )) {
           // A resolver refusal retries the registry page with the smaller range.
           if (
             resolverOnly &&

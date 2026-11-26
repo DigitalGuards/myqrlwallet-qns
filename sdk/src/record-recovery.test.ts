@@ -45,7 +45,7 @@ describe("unusable name records", () => {
       chain.addresses.set(good.node, ACCOUNT);
       chain.spellings.set(good.node, good.name);
       chain.seed(damaged.name, OTHER);
-      chain.owners.set(damaged.node, ACCOUNT);
+      chain.transfer(damaged.name, ACCOUNT);
       chain.resolvers.set(damaged.node, OTHER);
       chain.primary = damaged.name;
       chain.resolvers.set(reverseNodeFor(ACCOUNT), config.contracts.QRLPublicResolver ?? "");

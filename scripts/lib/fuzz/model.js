@@ -28,6 +28,7 @@ const MUTATIONS = Object.freeze({
     "ttl-event-always": "setRecord emits NewTTL even when the TTL is unchanged",
     "clear-records-noop": "clearRecords keeps the record version",
     "owner-view-unmasked": "registry.owner returns the registry itself",
+    "fifs-keeps-resolver": "a FIFS claim of a released name keeps its resolver and TTL",
 });
 let activeMutation = null;
 function setMutation(name) {
@@ -186,10 +187,8 @@ class Execution {
                 target.owner = args[0];
                 return true;
             case "renounceOwnership":
-                this.onlyOwner(contract, sender);
-                this.logs.push(log(address, [EVENT_TOPICS.OwnershipTransferred, word(target.owner), word(ZERO)]));
-                target.owner = ZERO;
-                return true;
+                // Root and ReverseRegistrar disable renunciation for every caller.
+                throw new Revert(errorData("RenounceOwnershipDisabled()", [], []));
             default:
                 return false;
         }
@@ -291,7 +290,10 @@ class Execution {
         if (current !== ZERO && current !== sender) {
             throw new Revert(errorData("NotAvailable(bytes32,address)", ["bytes32", "address"], [label, current]));
         }
-        this.registrySetSubnodeOwner(CONTRACTS.fifs, base, label, owner);
+        const child = this.registrySetSubnodeOwner(CONTRACTS.fifs, base, label, owner);
+        // A claim of an unowned name resets the registry resolver and TTL; a
+        // transfer by the current owner keeps them.
+        if (current === ZERO && !mutated("fifs-keeps-resolver")) this.setResolverAndTTL(child, ZERO, 0);
         this.logs.push(log(CONTRACTS.fifs, [EVENT_TOPICS.Registered, left(label), word(owner)]));
         return Buffer.alloc(0);
     }

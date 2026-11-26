@@ -19,6 +19,10 @@ Deployable contracts are listed in `scripts/compile-hyperion.js`:
 - `QRLPublicResolver`
 - `QRLSignatureVerifier`
 
+## Registrar claims
+
+`FIFSQRLRegistrar.register(label, owner)` assigns an unowned `.qrl` name with `QNSRegistry.setSubnodeRecord(baseNode, label, owner, address(0), 0)`, so a claim of a released name starts with no resolver pointer and a zero TTL. The current owner can call `register` again to transfer the name; that path uses `setSubnodeOwner` and keeps the resolver and TTL. Two kinds of earlier state sit outside the registry record and stay after a claim: records in a resolver, which the new owner removes with `clearRecords(node)` on the public resolver, and subnames of the node, which the new owner can reassign with `setSubnodeOwner` or `setSubnodeRecord` once it knows their label hashes from `NewOwner` events. The registrar deployed on the test network before this change keeps the resolver pointer and TTL on a claim.
+
 ## QRL 2.0 rules
 
 - Native addresses contain 64 bytes and use a `Q` prefix when represented as text.

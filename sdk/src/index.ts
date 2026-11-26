@@ -40,8 +40,8 @@ export type {
   TransactionStatus,
   TransactionUpdate,
 } from "./registration.js";
-export { listOwnedNames } from "./owned.js";
-export type { OwnedName } from "./owned.js";
+export { listOwnedNames, OWNED_NAME_CHECKS } from "./owned.js";
+export type { OwnedName, OwnedNameOptions } from "./owned.js";
 export {
   MLDSA87_DIGEST_BYTES,
   MLDSA87_MAX_CONTEXT_BYTES,

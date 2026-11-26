@@ -17,6 +17,7 @@ The in-tree `openzeppelin/access/Ownable.hyp` follows the OpenZeppelin v5 shape:
 - `root/Controllable.hyp` calls `Ownable(msg.sender)`.
 - `root/Root.hyp` inherits `Controllable` once and removes redundant direct `Ownable` inheritance.
 - `reverseRegistrar/ReverseRegistrar.hyp` inherits `Controllable` once. Its `Ownable(addr).owner()` interface check remains.
+- `root/Root.hyp` and `reverseRegistrar/ReverseRegistrar.hyp` override `renounceOwnership` as a `pure` function that reverts with `RenounceOwnershipDisabled()` for every caller. Upstream inherits the OpenZeppelin function, which leaves the contract without an owner. The selector is unchanged; ownership moves only through `transferOwnership`. The in-tree `Ownable` keeps the upstream behavior.
 
 ## QRL 2.0 mapping getter safety
 
@@ -47,6 +48,8 @@ This source-level divergence preserves complete native 64-byte `address` and lef
 ## Registrar (custom `registry/FIFSQRLRegistrar.hyp`)
 
 Derived from upstream `FIFSRegistrar` with additions: a `Registered` event, an `available(bytes32)` view, and a custom `NotAvailable` error in place of the upstream bare `require`.
+
+A claim of an unowned name calls `setSubnodeRecord(baseNode, label, owner, address(0), 0)`, so it clears the registry resolver and TTL that an earlier owner left. Upstream `FIFSRegistrar` calls `setSubnodeOwner` on every registration; the QNS registrar keeps that call for a transfer by the current owner.
 
 ## OpenZeppelin subset
 

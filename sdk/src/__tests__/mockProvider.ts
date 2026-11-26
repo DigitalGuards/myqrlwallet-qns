@@ -12,7 +12,6 @@ import { parseNetworkConfig } from "../config.js";
 import { namehash, nodeToHex } from "../namehash.js";
 import { registrationName } from "../registration.js";
 import { reverseNodeFor, type RpcProvider } from "../resolver.js";
-
 export const ACCOUNT = `Q${"a".repeat(128)}`;
 export const OTHER = `Q${"b".repeat(128)}`;
 export const config = parseNetworkConfig({
@@ -64,22 +63,69 @@ export class MockChain implements RpcProvider {
   logs: unknown[] = [];
   private labels = new Map<string, string>();
   private applied = new Set<string>();
+  private logIndex = 0;
+
+  /** Registry and resolver events carry a chain position, as on a node. */
+  private positioned(entry: { address: unknown; topics: string[]; data: string }) {
+    return {
+      ...entry,
+      blockNumber: "0x14",
+      logIndex: `0x${(this.logIndex++).toString(16)}`,
+      removed: false,
+    };
+  }
+  registryLog(signature: string, topics: string[], data: string): void {
+    this.logs.push(
+      this.positioned({
+        address: config.contracts.QNSRegistry,
+        topics: [`0x${bytes32Word(hashText(signature))}`, ...topics],
+        data,
+      }),
+    );
+  }
+  resolverLog(signature: string, node: string, data: string): void {
+    this.nameLogs.push(
+      this.positioned({
+        address: config.contracts.QRLPublicResolver,
+        topics: [`0x${bytes32Word(hashText(signature))}`, `0x${bytes32Word(node)}`],
+        data,
+      }),
+    );
+  }
 
   seed(name: string, owner: string): void {
     const entry = registrationName(name);
     this.labels.set(entry.labelHash, entry.node);
     this.owners.set(entry.node, owner);
-    this.logs.push({
-      address: config.contracts.QNSRegistry,
-      topics: [
-        `0x${bytes32Word(hashText("NewOwner(bytes32,bytes32,address)"))}`,
-        `0x${bytes32Word(nodeToHex(namehash("qrl")))}`,
-        `0x${bytes32Word(entry.labelHash)}`,
-      ],
-      data: `0x${addressWord(owner)}`,
-      removed: false,
-    });
+    this.registryLog(
+      "NewOwner(bytes32,bytes32,address)",
+      [`0x${bytes32Word(nodeToHex(namehash("qrl")))}`, `0x${bytes32Word(entry.labelHash)}`],
+      `0x${addressWord(owner)}`,
+    );
   }
+
+  /** The current owner hands the name to another account, as QNSRegistry.setOwner does. */
+  transfer(name: string, owner: string): void {
+    const entry = registrationName(name);
+    this.owners.set(entry.node, owner);
+    this.registryLog(
+      "Transfer(bytes32,address)",
+      [`0x${bytes32Word(entry.node)}`],
+      `0x${addressWord(owner)}`,
+    );
+  }
+
+  /** The current owner gives the name up; registry and resolver records stay. */
+  release(name: string): void {
+    const entry = registrationName(name);
+    this.owners.delete(entry.node);
+    this.registryLog(
+      "Transfer(bytes32,address)",
+      [`0x${bytes32Word(entry.node)}`],
+      `0x${addressWord(ZERO_ADDRESS)}`,
+    );
+  }
+
   private mutate(tx: SentTransaction): void {
     const sig = tx.data.slice(0, 10);
     const node = tx.data.slice(10, 74);
@@ -88,10 +134,17 @@ export class MockChain implements RpcProvider {
       const expected = registrationName("alice");
       if (`0x${node}` !== expected.labelHash) throw new Error("Mock registration supports alice");
       this.seed("alice", address);
-    } else if (sig === selector("setResolver(bytes32,address)"))
+    } else if (sig === selector("setResolver(bytes32,address)")) {
       this.resolvers.set(`0x${node}`, address);
-    else if (sig === selector("setAddr(bytes32,address)")) this.addresses.set(`0x${node}`, address);
-    else if (sig === selector("setName(string)")) {
+      this.registryLog(
+        "NewResolver(bytes32,address)",
+        [`0x${bytes32Word(`0x${node}`)}`],
+        `0x${addressWord(address)}`,
+      );
+    } else if (sig === selector("setAddr(bytes32,address)")) {
+      this.addresses.set(`0x${node}`, address);
+      this.resolverLog("AddrChanged(bytes32,address)", `0x${node}`, `0x${addressWord(address)}`);
+    } else if (sig === selector("setName(string)")) {
       const length = Number(BigInt(`0x${tx.data.slice(138, 266)}`));
       const bytes = new Uint8Array(length);
       for (let i = 0; i < length; i++)
@@ -108,14 +161,7 @@ export class MockChain implements RpcProvider {
         bytes[i] = parseInt(tx.data.slice(394 + i * 2, 396 + i * 2), 16);
       const spelling = new TextDecoder().decode(bytes);
       this.spellings.set(`0x${node}`, spelling);
-      this.nameLogs.push({
-        address: tx.to,
-        topics: [
-          `0x${bytes32Word(hashText("NameChanged(bytes32,string)"))}`,
-          `0x${bytes32Word(`0x${node}`)}`,
-        ],
-        data: `0x${stringArgument(spelling)}`,
-      });
+      this.resolverLog("NameChanged(bytes32,string)", `0x${node}`, `0x${stringArgument(spelling)}`);
     } else throw new Error("Unexpected write");
   }
   request(args: { method: string; params?: unknown[] }): Promise<unknown> {
@@ -149,9 +195,39 @@ export class MockChain implements RpcProvider {
     if (method === "qrl_blockNumber") return "0x20";
     if (method === "qrl_getLogs") {
       const filter = params[0];
-      return isRecord(filter) && filter.address === config.contracts.QRLPublicResolver
-        ? this.nameLogs
-        : this.logs;
+      const position = (entry: unknown, index: number) =>
+        isRecord(entry) && entry.blockNumber === undefined
+          ? { ...entry, blockNumber: "0x14", logIndex: `0x${(100000 + index).toString(16)}` }
+          : entry;
+      if (!isRecord(filter)) throw new Error("Invalid log filter");
+      const topics = Array.isArray(filter.topics) ? filter.topics : [];
+      // Owned-name scans use one address and concrete topics; they receive every stored log
+      // so malformed entries reach the SDK validation. Other filters match like a node does.
+      if (typeof filter.address === "string" && !topics.includes(null)) {
+        const word = (value: unknown) =>
+          typeof value === "string" && /^0x[0-9a-f]{128}$/.test(value);
+        // Other well-formed events stay out, as on a node; malformed entries are kept.
+        return (filter.address === config.contracts.QRLPublicResolver ? this.nameLogs : this.logs)
+          .map(position)
+          .filter(
+            (entry) =>
+              !isRecord(entry) ||
+              !Array.isArray(entry.topics) ||
+              !word(entry.topics[0]) ||
+              entry.topics[0] === topics[0],
+          );
+      }
+      const addresses: unknown[] = Array.isArray(filter.address)
+        ? filter.address
+        : [filter.address];
+      return [...this.logs, ...this.nameLogs].map(position).filter((entry) => {
+        if (!isRecord(entry) || !addresses.includes(entry.address) || !Array.isArray(entry.topics))
+          return false;
+        const logTopics: unknown[] = entry.topics;
+        return topics.every(
+          (value: unknown, index) => value === null || logTopics[index] === value,
+        );
+      });
     }
     if (method === "qrl_sendTransaction") {
       if (this.rejectSend === this.sent.length + 1)

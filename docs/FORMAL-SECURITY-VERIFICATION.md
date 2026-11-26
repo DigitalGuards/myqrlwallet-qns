@@ -90,7 +90,7 @@ Each property calls the production `QNSRegistry` function internally, so its `au
 
 1. `setController` writes exactly the named controller and keeps the owner.
 2. `transferOwnership` installs the new owner and leaves controllers unchanged.
-3. `renounceOwnership` leaves no owner and leaves controllers unchanged.
+3. `renounceOwnership` leaves no owner and leaves controllers unchanged. This is the inherited `Ownable` function; Root and ReverseRegistrar override it to revert, which the QNSRootControllable and QNSReverseRegistrar semantic suites and the fuzzer check.
 
 The owner check itself is not among these targets: see the custom-error boundary below.
 

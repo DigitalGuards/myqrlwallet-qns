@@ -9,6 +9,8 @@ import "./Controllable.hyp";
 // 2. OZ v5 Ownable requires an initialOwner; Controllable (our parent)
 //    forwards msg.sender, so Root no longer calls Ownable directly.
 //    Upstream was written against OZ v4 which had a no-arg Ownable.
+// 3. renounceOwnership always reverts; ownership moves only through
+//    transferOwnership.
 // See vendored/DIFFS.md.
 contract Root is Controllable {
     bytes32 private constant ROOT_NODE = bytes32(0);
@@ -17,6 +19,8 @@ contract Root is Controllable {
         bytes4(keccak256("supportsInterface(bytes4)"));
 
     event TLDLocked(bytes32 indexed label);
+
+    error RenounceOwnershipDisabled();
 
     IQNSRegistry public qns;
     mapping(bytes32 => bool) private _locked;
@@ -51,6 +55,12 @@ contract Root is Controllable {
     function lock(bytes32 label) external onlyOwner {
         emit TLDLocked(label);
         _locked[label] = true;
+    }
+
+    /// @notice Disabled. Leaving Root without an owner would leave every
+    ///         enabled controller with permanent power over unlocked labels.
+    function renounceOwnership() public pure override {
+        revert RenounceOwnershipDisabled();
     }
 
     function supportsInterface(

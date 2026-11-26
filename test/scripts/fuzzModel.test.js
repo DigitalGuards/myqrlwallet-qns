@@ -90,6 +90,78 @@ test("registry operators may write the registry and never the resolver", () => {
     assert.deepEqual(write.result.logs[0].topics, [EVENT_TOPICS.NewResolver, abi.leftWord(Buffer.from(NODES.alice, "hex"))]);
 });
 
+test("a FIFS claim of a released name resets its resolver and TTL, and a transfer keeps them", () => {
+    let { state } = modelSetup();
+    ({ state } = run(state, "alice", "fifs", "register", [LABELS.alice, ACTORS.alice]));
+    ({ state } = run(state, "alice", "registry", "setResolver", [NODES.alice, CONTRACTS.resolver]));
+    ({ state } = run(state, "alice", "registry", "setTTL", [NODES.alice, 3600n]));
+    ({ state } = run(state, "alice", "resolver", "setAddr", [NODES.alice, ACTORS.alice]));
+    const transfer = run(state, "alice", "fifs", "register", [LABELS.alice, ACTORS.carol]);
+    assert.equal(transfer.result.status, "success");
+    assert.equal(viewOutput(transfer.state, "registry", "resolver", [NODES.alice]).toString("hex"), CONTRACTS.resolver);
+    assert.deepEqual(viewOutput(transfer.state, "registry", "ttl", [NODES.alice]), abi.uintWord(3600n));
+    ({ state } = run(state, "alice", "registry", "setOwner", [NODES.alice, ZERO]));
+    const claim = run(state, "bob", "fifs", "register", [LABELS.alice, ACTORS.bob]);
+    assert.equal(claim.result.status, "success");
+    assert.deepEqual(
+        claim.result.logs.map((entry) => entry.topics[0]),
+        [EVENT_TOPICS.NewOwner, EVENT_TOPICS.NewResolver, EVENT_TOPICS.NewTTL, EVENT_TOPICS.Registered]
+    );
+    assert.equal(viewOutput(claim.state, "registry", "owner", [NODES.alice]).toString("hex"), ACTORS.bob);
+    assert.equal(viewOutput(claim.state, "registry", "resolver", [NODES.alice]).toString("hex"), ZERO);
+    assert.deepEqual(viewOutput(claim.state, "registry", "ttl", [NODES.alice]), abi.uintWord(0n));
+    // Records stored on the resolver are outside the registry record.
+    assert.equal(viewOutput(claim.state, "resolver", "addr", [NODES.alice]).toString("hex"), ACTORS.alice);
+});
+
+test("a FIFS claim to the zero address resets a released name and leaves it available", () => {
+    let { state } = modelSetup();
+    ({ state } = run(state, "alice", "fifs", "register", [LABELS.alice, ACTORS.alice]));
+    ({ state } = run(state, "alice", "registry", "setResolver", [NODES.alice, CONTRACTS.resolver]));
+    ({ state } = run(state, "alice", "registry", "setTTL", [NODES.alice, 60n]));
+    ({ state } = run(state, "alice", "registry", "setOwner", [NODES.alice, ZERO]));
+    const parked = run(state, "carol", "fifs", "register", [LABELS.alice, ZERO]);
+    assert.equal(parked.result.status, "success");
+    assert.equal(viewOutput(parked.state, "registry", "owner", [NODES.alice]).toString("hex"), ZERO);
+    assert.equal(viewOutput(parked.state, "registry", "resolver", [NODES.alice]).toString("hex"), ZERO);
+    assert.deepEqual(viewOutput(parked.state, "registry", "ttl", [NODES.alice]), abi.uintWord(0n));
+    assert.deepEqual(viewOutput(parked.state, "fifs", "available", [LABELS.alice]), abi.uintWord(1n));
+    const claim = run(parked.state, "bob", "fifs", "register", [LABELS.alice, ACTORS.bob]);
+    assert.equal(claim.result.status, "success");
+    assert.equal(viewOutput(claim.state, "registry", "owner", [NODES.alice]).toString("hex"), ACTORS.bob);
+});
+
+test("the generator claims released names that still carry a resolver", () => {
+    const { state } = modelSetup();
+    let reached = 0;
+    for (let i = 0; i < 400 && reached === 0; i++) {
+        const sequence = generateSequence(sequenceSeed("coverage", i), 25, state);
+        sequence.steps.forEach((step, index) => {
+            if (step.contract !== "fifs" || sequence.results[index].status !== "success") return;
+            const before = index === 0 ? state : sequence.states[index - 1];
+            const node = W.subnode(NODES.qrl, step.args[0]);
+            const record = before.registry.records.get(node);
+            const unowned = !record || record.owner === ZERO || record.owner === CONTRACTS.registry;
+            if (record && unowned && record.resolver !== ZERO) reached += 1;
+        });
+    }
+    assert.ok(reached > 0);
+});
+
+test("Root and ReverseRegistrar reject renounceOwnership for every caller", () => {
+    const { state } = modelSetup();
+    const disabled = errorData("RenounceOwnershipDisabled()", [], []);
+    assert.equal(disabled.subarray(0, 4).toString("hex"), "ffc0fd93");
+    for (const contract of ["root", "rr"]) {
+        for (const actor of ["admin", "bob"]) {
+            const { result, state: after } = run(state, actor, contract, "renounceOwnership", []);
+            assert.equal(result.status, "revert");
+            assert.deepEqual(result.output, disabled);
+            assert.equal(after[contract].owner, ACTORS.admin);
+        }
+    }
+});
+
 test("revert data matches the contract errors", () => {
     let { state } = modelSetup();
     ({ state } = run(state, "alice", "fifs", "register", [LABELS.alice, ACTORS.alice]));
