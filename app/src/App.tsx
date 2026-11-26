@@ -26,6 +26,7 @@ import {
   readRegistrationState,
   TransactionMismatchError,
   RevertedTransactionError,
+  type EarlierState,
   type NetworkConfig,
   type OwnedName,
   type RpcProvider,
@@ -34,10 +35,13 @@ import {
 import { errorMessage } from "./rpc";
 import { decideRecovery, type RecoveryCheck, type RecoveryRecords } from "./recovery";
 import {
+  dropPlannedClear,
   knownNames,
+  plannedClear,
   readPendingClaim,
   rememberName,
   savePendingClaim,
+  savePlannedClear,
   type PendingClaim,
 } from "./storage";
 import type { WalletController } from "./wallet";
@@ -105,6 +109,22 @@ export function uncheckedNotice(count: number): string {
   return count === 1
     ? "1 more name from this address's history was not checked. Search for a name to check it."
     : `${String(count)} more names from this address's history were not checked. Search for a name to check it.`;
+}
+
+/** One plain line about what an earlier owner left on an unowned name. */
+export function leftoverNotice(leftovers: EarlierState | null): string | null {
+  // A failed log read hides the line; the claim plan still clears.
+  if (!leftovers || leftovers.logs === "unavailable") return null;
+  const records =
+    !/^Q0+$/.test(leftovers.resolver) || leftovers.records || leftovers.logs === "writes";
+  const count = leftovers.subnames ?? 0;
+  const subnames = `${String(count)} ${count === 1 ? "subname" : "subnames"}`;
+  if (records && count > 0)
+    return `An earlier owner left records and ${subnames} on this name. Claiming clears the records; the ${count === 1 ? "subname keeps its owner" : "subnames keep their owners"}.`;
+  if (records) return "An earlier owner left records on this name. Claiming clears them.";
+  if (count > 0)
+    return `An earlier owner left ${subnames} under this name. ${count === 1 ? "It keeps its owner" : "They keep their owners"} after you claim it.`;
+  return null;
 }
 
 function Row({
@@ -210,12 +230,8 @@ export function App({
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletReady, setWalletReady] = useState(false);
   const [input, setInput] = useState("");
-  const { search, searching, searchError, readErrorName, refreshName, getSelection } = useNameState(
-    config,
-    provider,
-    controller,
-    wallet.revision,
-  );
+  const { search, searching, searchError, readErrorName, refreshName, getSelection, history } =
+    useNameState(config, provider, controller, wallet.revision);
   const latestRefreshName = useRef(refreshName);
   latestRefreshName.current = refreshName;
   const [primary, setPrimary] = useState(false);
@@ -508,14 +524,18 @@ export function App({
     const plan =
       target === search && makePrimary === primary && searchPlan
         ? searchPlan
-        : registrationPlan(target.setup, makePrimary);
+        : registrationPlan(target.setup, makePrimary, plannedClear(config, account, target.node));
     setFlow({ ...scope, primary: makePrimary, plan });
     setUpdateState(null);
     rememberName(config, name);
+    // A clear decided now stays with this account's claim until the claim finishes.
+    const clear = plan.find((entry) => entry.step === "clear")?.version;
+    if (clear !== undefined) savePlannedClear(config, account, target.node, clear);
     try {
       await registerName(name, {
         config,
         provider,
+        history,
         wallet: wallet.provider,
         account,
         transport: wallet.transport,
@@ -529,6 +549,7 @@ export function App({
           recordSubmission(scope, update, makePrimary);
         },
       });
+      dropPlannedClear(config, account, target.node);
       abort.signal.throwIfAborted();
       await latestRefreshName.current();
       abort.signal.throwIfAborted();
@@ -600,7 +621,7 @@ export function App({
     try {
       await snapshot;
       if (!current()) return;
-      const context = { config, provider };
+      const context = { config, provider, history };
       let decision = decide();
       let appliedUpdate: TransactionUpdate | undefined;
       if (decision.next === "check") {
@@ -743,7 +764,9 @@ export function App({
   }
   const owned = search?.owner !== null && search?.owner === wallet.account;
   const canClaim = search && (search.available || owned);
-  const searchPlan = search?.setup ? registrationPlan(search.setup, primary) : null;
+  const searchClear =
+    search && wallet.account ? plannedClear(config, wallet.account, search.node) : null;
+  const searchPlan = search?.setup ? registrationPlan(search.setup, primary, searchClear) : null;
   const approvalPlan = claiming ? flow?.plan : searchPlan;
   const showApprovals = claiming || (canClaim && !setupComplete(search.setup, primary));
   const deployed = isDeployed(config);
@@ -788,6 +811,7 @@ export function App({
     searching,
     searchError,
     ...(claiming && flow?.plan ? { plan: flow.plan } : {}),
+    plannedClear: searchClear,
   };
 
   const approvalDetails = showApprovals && (
@@ -954,6 +978,9 @@ export function App({
                       <Row label="Records">Resolver not usable</Row>
                     )}
                   </dl>
+                  {search.available && leftoverNotice(search.leftovers) && (
+                    <p className="text-sm mt-3">{leftoverNotice(search.leftovers)}</p>
+                  )}
                   {approvalDetails}
                   {wallet.account
                     ? !setupComplete(search.setup, primary) && (

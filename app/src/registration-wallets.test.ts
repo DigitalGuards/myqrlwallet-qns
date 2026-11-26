@@ -21,7 +21,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const steps: RegistrationStep[] = ["register", "resolver", "address", "name", "primary"];
+const steps: RegistrationStep[] = ["register", "address", "resolver", "name", "primary"];
 
 function connectedRelay(chain: MockChain) {
   const wallet = new QRLConnectProvider({

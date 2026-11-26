@@ -24,7 +24,7 @@ function seedReady(chain: MockChain) {
   return parsed;
 }
 
-const steps: RegistrationStep[] = ["register", "resolver", "address", "name", "primary"];
+const steps: RegistrationStep[] = ["register", "clear", "address", "resolver", "name", "primary"];
 const states = [false, true];
 describe("remaining setup writes", () => {
   it.each(
@@ -70,8 +70,14 @@ describe("remaining setup writes", () => {
       const state = await readRegistrationState(parsed.name, ACCOUNT, { config, provider: chain });
       const plan = registrationPlan(state, makePrimary);
       const required = plan.filter((entry) => entry.required).map((entry) => entry.step);
+      // An unowned name with a resolver pointer is cleared first; a foreign pointer is
+      // replaced before the address is written.
+      expect(state.earlier?.needsClear ?? false).toBe(!owned);
+      const order: RegistrationStep[] = selected
+        ? steps
+        : ["register", "clear", "resolver", "address", "name", "primary"];
       expect(plan.map((entry) => entry.step)).toEqual(
-        steps.filter((step) => step !== "primary" || makePrimary),
+        order.filter((step) => (step !== "primary" || makePrimary) && (step !== "clear" || !owned)),
       );
       if (!address) expect(state.complete.name).toBe(false);
       if (!selected || !address) expect(state.complete.primary).toBe(false);

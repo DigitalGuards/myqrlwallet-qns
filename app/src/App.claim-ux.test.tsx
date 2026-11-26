@@ -257,7 +257,9 @@ describe("claim explanations", () => {
       "listitem",
     );
     expect(steps).toHaveLength(5);
-    for (const [index, step] of claimSteps.entries()) {
+    // A fresh name has no earlier records, so its plan has no clear step.
+    const freshSteps = claimSteps.filter((step) => step !== "clear");
+    for (const [index, step] of freshSteps.entries()) {
       const row = steps[index];
       if (!row) throw new Error("Missing step");
       const view = within(row);
@@ -271,7 +273,7 @@ describe("claim explanations", () => {
     expect(screen.getByText("Each approval costs a small fee in Quanta.")).toBeDefined();
     expect(screen.queryByText(/\d+ QRL/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Claim name" }));
-    for (const [index, step] of claimSteps.entries()) {
+    for (const [index, step] of freshSteps.entries()) {
       await screen.findByText("Approve in your wallet now", { selector: "dd" });
       const current = document.querySelector('[aria-current="step"]');
       expect(current?.textContent).toContain(stepDetails[step].title);

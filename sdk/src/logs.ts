@@ -1,4 +1,5 @@
-import { isRecord, toQuantity } from "./abi.js";
+import { canonicalAddress, isRecord, quantity, toQuantity } from "./abi.js";
+import { isHexBytes } from "./guards.js";
 import type { RpcProvider } from "./resolver.js";
 
 /** Pages start at 2,000 blocks and shrink to the endpoint's range limit. */
@@ -71,4 +72,38 @@ export async function scanLogs(
     start = end + 1n;
   }
   return results;
+}
+/** A validated log with its position in the chain. */
+export interface ChainLog {
+  address: string;
+  topics: readonly string[];
+  data: string;
+  block: bigint;
+  index: bigint;
+}
+
+/** Logs are untrusted input: anything malformed fails the read. Removed logs are dropped. */
+export function parseLogs(raw: readonly unknown[]): ChainLog[] {
+  const logs: ChainLog[] = [];
+  for (const item of raw) {
+    if (!isRecord(item) || !Array.isArray(item.topics)) throw new Error("Invalid log");
+    if (item.removed === true) continue;
+    const topics: unknown[] = item.topics;
+    const data: unknown = item.data;
+    if (!topics.every(isHexBytes) || !isHexBytes(data)) throw new Error("Invalid log");
+    logs.push({
+      address: canonicalAddress(item.address),
+      topics: topics.map((topic) => topic.toLowerCase()),
+      data: data.toLowerCase(),
+      block: quantity(item.blockNumber),
+      index: quantity(item.logIndex),
+    });
+  }
+  return logs;
+}
+
+export function compareLogs(a: ChainLog, b: ChainLog): number {
+  if (a.block !== b.block) return a.block < b.block ? -1 : 1;
+  if (a.index !== b.index) return a.index < b.index ? -1 : 1;
+  return 0;
 }

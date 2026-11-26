@@ -2,6 +2,7 @@ import {
   requireContract,
   registrationPlan,
   registrationSteps,
+  type PlannedClear,
   type RegistrationPlan,
   type TransactionStatus,
   type NetworkConfig,
@@ -18,6 +19,13 @@ export const stepDetails = {
     role: "FIFS registrar",
     contract: "FIFSQRLRegistrar",
     function: "register(label, owner)",
+  },
+  clear: {
+    title: "Clear earlier records",
+    description: (name: string) => `Removes the records an earlier owner left on ${name}.`,
+    role: "Public resolver",
+    contract: "QRLPublicResolver",
+    function: "clearRecords(node)",
   },
   resolver: {
     title: "Choose where records live",
@@ -149,6 +157,8 @@ interface ClaimProgressProps {
   primary: boolean;
   state: RegistrationState | null | undefined;
   plan?: RegistrationPlan;
+  /** A clear saved with this account's claim of the name, carried into a resumed plan. */
+  plannedClear?: PlannedClear | null;
   updates: TransactionUpdate[];
   running: boolean;
   connected?: boolean;
@@ -172,17 +182,18 @@ function progressFor({
   primary,
   state,
   plan: suppliedPlan,
+  plannedClear = null,
   updates,
   running,
   connected = false,
   searching = false,
   searchError = null,
 }: ClaimProgressProps) {
-  const plan = suppliedPlan ?? (state ? registrationPlan(state, primary) : null);
+  const plan = suppliedPlan ?? (state ? registrationPlan(state, primary, plannedClear) : null);
   const entries =
     plan ??
     claimSteps
-      .filter((step) => step !== "primary" || primary)
+      .filter((step) => (step !== "primary" || primary) && step !== "clear")
       .map((step) => ({ step, required: true }));
   const steps = entries.map(({ step }) => step);
   const progress = entries.map(({ step, required }) => {

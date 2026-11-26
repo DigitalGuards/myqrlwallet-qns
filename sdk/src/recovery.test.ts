@@ -337,7 +337,7 @@ describe("transaction recovery", () => {
   });
 });
 
-const steps: RegistrationStep[] = ["register", "resolver", "address", "name", "primary"];
+const steps: RegistrationStep[] = ["register", "address", "resolver", "name", "primary"];
 
 describe("name state recovery", () => {
   it.each([0, 1, 2, 3, 4, 5])(
@@ -346,8 +346,8 @@ describe("name state recovery", () => {
       const provider = new MockChain();
       const node = registrationName("alice").node;
       if (completed >= 1) provider.seed("alice", ACCOUNT);
-      if (completed >= 2) provider.resolvers.set(node, config.contracts.QRLPublicResolver ?? "");
-      if (completed >= 3) provider.addresses.set(node, ACCOUNT);
+      if (completed >= 2) provider.addresses.set(node, ACCOUNT);
+      if (completed >= 3) provider.resolvers.set(node, config.contracts.QRLPublicResolver ?? "");
       if (completed >= 4) provider.spellings.set(node, "alice.qrl");
       if (completed >= 5) {
         provider.primary = "alice.qrl";

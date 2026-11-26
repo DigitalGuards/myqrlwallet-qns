@@ -16,7 +16,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const steps: sdk.RegistrationStep[] = ["register", "resolver", "address", "name", "primary"];
+const steps: sdk.RegistrationStep[] = ["register", "address", "resolver", "name", "primary"];
 const hash = `0x${"d".repeat(64)}`;
 const third = `Q${"c".repeat(128)}`;
 

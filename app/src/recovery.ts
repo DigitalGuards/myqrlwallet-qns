@@ -94,7 +94,10 @@ export function decideRecovery(
     return keep({ ...update, status: "incomplete", message }, message);
   }
 
-  const steps = registrationSteps.filter((step) => step !== "primary" || saved.primary);
+  // A clear is never reported as skipped: its row belongs only to a plan that carries one.
+  const steps = registrationSteps.filter(
+    (step) => step !== "clear" && (step !== "primary" || saved.primary),
+  );
   const showFinished = steps.every((step) => records.state.complete[step]);
   return {
     next: "delete",
