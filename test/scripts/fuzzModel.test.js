@@ -114,6 +114,23 @@ test("a FIFS claim of a released name resets its resolver and TTL, and a transfe
     assert.equal(viewOutput(claim.state, "resolver", "addr", [NODES.alice]).toString("hex"), ACTORS.alice);
 });
 
+test("a FIFS claim to the zero address resets a released name and leaves it available", () => {
+    let { state } = modelSetup();
+    ({ state } = run(state, "alice", "fifs", "register", [LABELS.alice, ACTORS.alice]));
+    ({ state } = run(state, "alice", "registry", "setResolver", [NODES.alice, CONTRACTS.resolver]));
+    ({ state } = run(state, "alice", "registry", "setTTL", [NODES.alice, 60n]));
+    ({ state } = run(state, "alice", "registry", "setOwner", [NODES.alice, ZERO]));
+    const parked = run(state, "carol", "fifs", "register", [LABELS.alice, ZERO]);
+    assert.equal(parked.result.status, "success");
+    assert.equal(viewOutput(parked.state, "registry", "owner", [NODES.alice]).toString("hex"), ZERO);
+    assert.equal(viewOutput(parked.state, "registry", "resolver", [NODES.alice]).toString("hex"), ZERO);
+    assert.deepEqual(viewOutput(parked.state, "registry", "ttl", [NODES.alice]), abi.uintWord(0n));
+    assert.deepEqual(viewOutput(parked.state, "fifs", "available", [LABELS.alice]), abi.uintWord(1n));
+    const claim = run(parked.state, "bob", "fifs", "register", [LABELS.alice, ACTORS.bob]);
+    assert.equal(claim.result.status, "success");
+    assert.equal(viewOutput(claim.state, "registry", "owner", [NODES.alice]).toString("hex"), ACTORS.bob);
+});
+
 test("the generator claims released names that still carry a resolver", () => {
     const { state } = modelSetup();
     let reached = 0;
