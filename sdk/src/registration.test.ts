@@ -308,9 +308,9 @@ describe("owned names", () => {
   it("finds names transferred in, excludes transfers out, and keeps unknown spellings visible", async () => {
     const { provider, options } = setup();
     provider.seed("alice", OTHER);
-    provider.owners.set(registrationName("alice").node, ACCOUNT);
+    provider.transfer("alice", ACCOUNT);
     provider.seed("bob", ACCOUNT);
-    provider.owners.set(registrationName("bob").node, OTHER);
+    provider.transfer("bob", OTHER);
     provider.seed("carol", ACCOUNT);
     const names = await listOwnedNames(ACCOUNT, options, ["Alice.QRL", "bob", "café"]);
     expect(names).toHaveLength(2);

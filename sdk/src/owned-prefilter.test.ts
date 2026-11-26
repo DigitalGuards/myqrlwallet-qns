@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addressWord, bytes32Word, isRecord, selector, stringArgument } from "./abi.js";
+import { bytes32Word, hashText, isRecord, selector, stringArgument } from "./abi.js";
 import { namehash, nodeToHex } from "./namehash.js";
 import { listOwnedNames } from "./owned.js";
 import { registrationName } from "./registration.js";
@@ -8,13 +8,7 @@ import { ACCOUNT, OTHER, config, MockChain } from "./__tests__/mockProvider.js";
 const THIRD = `Q${"c".repeat(128)}`;
 
 function transfer(chain: MockChain, name: string, to: string): void {
-  const node = registrationName(name).node;
-  chain.owners.set(node, to);
-  chain.registryLog(
-    "Transfer(bytes32,address)",
-    [`0x${bytes32Word(node)}`],
-    `0x${addressWord(to)}`,
-  );
+  chain.transfer(name, to);
 }
 
 /** Owner reads per node, to show which candidates were verified. */
@@ -69,8 +63,11 @@ describe("owned names pre-filtered on log data", () => {
       .sort();
     expect(nodes).toEqual(every);
     const checked = new Set(ownerChecks(chain));
-    for (const name of ["mine", "gift", "sold", "dropped", "back"])
+    for (const name of ["mine", "gift", "back"])
       expect(checked.has(registrationName(name).node)).toBe(true);
+    // Names whose last ownership log names someone else, or a release, are not checked.
+    for (const name of ["sold", "dropped"])
+      expect(checked.has(registrationName(name).node)).toBe(false);
     for (let i = 0; i < 30; i++)
       expect(checked.has(registrationName(`spam${String(i)}`).node)).toBe(false);
   });
@@ -85,11 +82,96 @@ describe("owned names pre-filtered on log data", () => {
     });
     expect(names).toHaveLength(5);
     expect(unchecked).toEqual([7]);
-    // Log matches come first, in log order; the hint n11 is past the limit.
+    // The hint comes first, then the newest log matches.
     expect(names.map((item) => item.node).sort()).toEqual(
-      ["n0", "n1", "n2", "n3", "n4"].map((name) => registrationName(name).node).sort(),
+      ["n11", "n10", "n9", "n8", "n7"].map((name) => registrationName(name).node).sort(),
     );
     expect(new Set(ownerChecks(chain)).size).toBe(5);
+  });
+
+  it("keeps current names inside the bound when old assignments to the account moved on", async () => {
+    const chain = new MockChain();
+    // Names once assigned to the account and later moved to another account.
+    for (let i = 0; i < 10; i++) {
+      chain.seed(`old${String(i)}`, ACCOUNT);
+      transfer(chain, `old${String(i)}`, OTHER);
+    }
+    chain.seed("current", ACCOUNT);
+    const unchecked: number[] = [];
+    const names = await listOwnedNames(ACCOUNT, { config, provider: chain }, [], undefined, {
+      limit: 3,
+      onUnchecked: (count) => unchecked.push(count),
+    });
+    expect(names.map((item) => item.node)).toEqual([registrationName("current").node]);
+    expect(unchecked).toEqual([]);
+  });
+
+  it("checks saved and primary-name hints before log matches", async () => {
+    const chain = new MockChain();
+    for (let i = 0; i < 6; i++) chain.seed(`n${String(i)}`, ACCOUNT);
+    chain.seed("saved", ACCOUNT);
+    const names = await listOwnedNames(
+      ACCOUNT,
+      { config, provider: chain },
+      ["saved", "n0"],
+      undefined,
+      { limit: 3 },
+    );
+    expect(names.map((item) => item.node).sort()).toEqual(
+      ["saved", "n0", "n5"].map((name) => registrationName(name).node).sort(),
+    );
+  });
+
+  it("orders NewOwner and Transfer logs by chain position", async () => {
+    const chain = new MockChain();
+    // Transferred to the account, released, then claimed by another account at the registrar.
+    chain.seed("moved", OTHER);
+    transfer(chain, "moved", ACCOUNT);
+    chain.release("moved");
+    chain.seed("moved", OTHER);
+    // Assigned to another account, then transferred to the account.
+    chain.seed("kept", OTHER);
+    transfer(chain, "kept", ACCOUNT);
+    const names = await listOwnedNames(ACCOUNT, { config, provider: chain });
+    expect(names.map((item) => item.node)).toEqual([registrationName("kept").node]);
+    expect(new Set(ownerChecks(chain))).toEqual(new Set([registrationName("kept").node]));
+  });
+
+  it.each([
+    ["a non-record item", "unexpected"],
+    ["missing topics", { address: config.contracts.QNSRegistry, data: "0x" }],
+    [
+      "a short data word",
+      {
+        address: config.contracts.QNSRegistry,
+        topics: [
+          `0x${bytes32Word(hashText("Transfer(bytes32,address)"))}`,
+          `0x${bytes32Word(registrationName("mine").node)}`,
+        ],
+        data: "0x01",
+        blockNumber: "0x14",
+        logIndex: "0x1",
+      },
+    ],
+  ])("fails the listing on a malformed Transfer item: %s", async (_label, item) => {
+    class BadTransfers extends MockChain {
+      override request(args: Parameters<MockChain["request"]>[0]): Promise<unknown> {
+        const filter = args.params?.[0];
+        if (
+          args.method === "qrl_getLogs" &&
+          isRecord(filter) &&
+          Array.isArray(filter.topics) &&
+          filter.topics[0] === `0x${bytes32Word(hashText("Transfer(bytes32,address)"))}`
+        )
+          return Promise.resolve([item]);
+        return super.request(args);
+      }
+    }
+    const chain = new BadTransfers();
+    chain.seed("mine", ACCOUNT);
+    await expect(listOwnedNames(ACCOUNT, { config, provider: chain })).rejects.toThrow(
+      /Invalid (transfer log|ownership log data)/,
+    );
   });
 
   it("rejects ownership logs whose data is not a native address word", async () => {

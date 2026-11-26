@@ -9,6 +9,7 @@ import {
   isRecord,
   quantity,
   toQuantity,
+  ZERO_ADDRESS,
 } from "./abi.js";
 import { assertNetwork, requireContract } from "./config.js";
 import { isHexBytes } from "./guards.js";
@@ -37,6 +38,14 @@ export type OwnedName = OwnedNameIdentity &
     | { records: null; primary: null; error: string }
   );
 
+function logPosition(item: Record<string, unknown>): { block: bigint; index: bigint } {
+  try {
+    return { block: quantity(item.blockNumber), index: quantity(item.logIndex) };
+  } catch {
+    throw new Error("Invalid ownership log position");
+  }
+}
+
 function decodeOwner(data: unknown): string {
   try {
     return decodeAddress(data);
@@ -56,7 +65,7 @@ function subnode(parent: string, label: string): string {
 export const OWNED_NAME_CHECKS = 500;
 
 export interface OwnedNameOptions {
-  /** Most candidates verified with an owner() call; log matches are checked before hints. */
+  /** Most candidates verified with an owner() call; hints are checked before log matches. */
   limit?: number;
   /** Called with the number of candidates left unchecked when the limit is reached. */
   onUnchecked?: (count: number) => void;
@@ -104,7 +113,9 @@ export async function listOwnedNames(
       if (!(error instanceof QnsNameError)) throw error;
     }
   }
-  for (const input of primary ? [...knownNames, primary] : knownNames) {
+  for (const input of primary
+    ? [primary, ...[...knownNames].reverse()]
+    : [...knownNames].reverse()) {
     try {
       const parsed = registrationName(input);
       names.set(parsed.node, parsed.name);
@@ -136,8 +147,8 @@ export async function listOwnedNames(
   signal?.throwIfAborted();
   /** Every .qrl node seen, with its label hash. */
   const labels = new Map<string, string>();
-  /** Nodes whose ownership log data names the account, in log order. */
-  const matched = new Set<string>();
+  /** Ownership changes from NewOwner under .qrl and from Transfer, with chain positions. */
+  const changes: { node: string; owner: string; block: bigint; index: bigint }[] = [];
   for (const raw of ownership) {
     const item: unknown = raw;
     if (
@@ -161,19 +172,43 @@ export async function listOwnedNames(
     const labelHash = label.slice(0, 66);
     const child = subnode(parent, labelHash);
     labels.set(child, labelHash);
-    if (decodeOwner(item.data) === owner) matched.add(child);
+    changes.push({ node: child, owner: decodeOwner(item.data), ...logPosition(item) });
   }
   for (const raw of transfers) {
     const item: unknown = raw;
-    if (!isRecord(item) || item.removed === true || !Array.isArray(item.topics)) continue;
+    if (
+      !isRecord(item) ||
+      !Array.isArray(item.topics) ||
+      item.topics.length !== 2 ||
+      canonicalAddress(item.address) !== registry
+    )
+      throw new Error("Invalid transfer log");
+    if (item.removed === true) continue;
     const topics: unknown[] = item.topics;
     const [signature, node] = topics;
-    // Transfers of other registry nodes are skipped; only .qrl names become candidates.
-    if (signature !== transferTopic || canonicalAddress(item.address) !== registry) continue;
-    if (!isHexBytes(node) || node.length !== 130 || node.slice(66) !== "0".repeat(64))
+    if (
+      signature !== transferTopic ||
+      !isHexBytes(node) ||
+      node.length !== 130 ||
+      node.slice(66) !== "0".repeat(64)
+    )
       throw new Error("Invalid native transfer topics");
-    if (decodeOwner(item.data) === owner) matched.add(node.slice(0, 66));
+    changes.push({ node: node.slice(0, 66), owner: decodeOwner(item.data), ...logPosition(item) });
   }
+  // The last ownership change of each node, in chain order (block, then log index).
+  changes.sort((a, b) =>
+    a.block !== b.block
+      ? a.block < b.block
+        ? -1
+        : 1
+      : a.index < b.index
+        ? -1
+        : a.index > b.index
+          ? 1
+          : 0,
+  );
+  const last = new Map<string, { owner: string; at: number }>();
+  changes.forEach(({ node, owner: holder }, at) => last.set(node, { owner: holder, at }));
   for (const raw of spellings) {
     const item: unknown = raw;
     if (!isRecord(item) || item.removed === true || !Array.isArray(item.topics)) continue;
@@ -194,14 +229,24 @@ export async function listOwnedNames(
       // Name records are public input. Only normalized hash-matching spellings are hints.
     }
   }
-  // Log matches come first, in log order. Published spellings only label results; hints also
-  // cover a just-confirmed name while a log endpoint catches up.
+  // Saved and primary-name hints come first: they also cover a just-confirmed name while a
+  // log endpoint catches up. Then the names whose last ownership log names the account,
+  // newest first. Published spellings only label results.
+  const unowned = (holder: string) => holder === ZERO_ADDRESS || holder === registry;
   const candidates = new Map<string, string>();
-  for (const node of matched) {
+  for (const [node, labelHash] of hints) candidates.set(node, labelHash);
+  const matched = [...last]
+    .filter(([node, change]) => change.owner === owner && labels.has(node))
+    .sort(([, a], [, b]) => b.at - a.at);
+  for (const [node] of matched) {
     const labelHash = labels.get(node);
-    if (labelHash !== undefined) candidates.set(node, labelHash);
+    if (labelHash !== undefined && !candidates.has(node)) candidates.set(node, labelHash);
   }
-  for (const [node, labelHash] of hints) if (!candidates.has(node)) candidates.set(node, labelHash);
+  // A name whose last ownership log names another account is not checked.
+  for (const node of [...candidates.keys()]) {
+    const change = last.get(node);
+    if (change && change.owner !== owner && !unowned(change.owner)) candidates.delete(node);
+  }
   const checked = [...candidates].slice(0, limit);
   if (candidates.size > checked.length) options.onUnchecked?.(candidates.size - checked.length);
   const result: OwnedName[] = [];
