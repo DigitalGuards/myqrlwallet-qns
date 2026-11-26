@@ -131,6 +131,20 @@ test("the generator claims released names that still carry a resolver", () => {
     assert.ok(reached > 0);
 });
 
+test("Root and ReverseRegistrar reject renounceOwnership for every caller", () => {
+    const { state } = modelSetup();
+    const disabled = errorData("RenounceOwnershipDisabled()", [], []);
+    assert.equal(disabled.subarray(0, 4).toString("hex"), "ffc0fd93");
+    for (const contract of ["root", "rr"]) {
+        for (const actor of ["admin", "bob"]) {
+            const { result, state: after } = run(state, actor, contract, "renounceOwnership", []);
+            assert.equal(result.status, "revert");
+            assert.deepEqual(result.output, disabled);
+            assert.equal(after[contract].owner, ACTORS.admin);
+        }
+    }
+});
+
 test("revert data matches the contract errors", () => {
     let { state } = modelSetup();
     ({ state } = run(state, "alice", "fifs", "register", [LABELS.alice, ACTORS.alice]));

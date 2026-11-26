@@ -115,7 +115,7 @@ The local config must declare `"qrl2PrecompileSet": "qrl2-pq-v1"`. Deployment ve
 
 The initial deployment account owns `Root`, is a Root controller, owns `ReverseRegistrar`, and directly owns the `reverse` registry node. Root owns the root node, FIFSQRLRegistrar owns `qrl`, and ReverseRegistrar owns `addr.reverse`; both top-level labels start unlocked. ReverseRegistrar starts with no controllers, and the resolver trusts it for `setName`. Ownable transfers and renunciation preserve controller roles.
 
-Never call `renounceOwnership` on Root or ReverseRegistrar. Renunciation is irreversible. Renouncing Root while any controller is enabled leaves that controller with permanent power over every unlocked top-level label. The handoff never renounces.
+The current sources make `renounceOwnership` revert on Root and ReverseRegistrar for every caller. The contracts deployed on the test network were built before that change and still accept it from their owner: never call it there. Renunciation is irreversible. Renouncing Root while any controller is enabled leaves that controller with permanent power over every unlocked top-level label. The handoff never renounces.
 
 The [deployment governance guide](docs/DEPLOYMENT-GOVERNANCE.md) documents the complete inventory, configuration and recovery limits. The handoff checklist is:
 

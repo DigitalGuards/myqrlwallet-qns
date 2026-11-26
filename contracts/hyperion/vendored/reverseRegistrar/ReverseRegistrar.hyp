@@ -164,4 +164,14 @@ contract ReverseRegistrar is Controllable, IReverseRegistrar {
             return false;
         }
     }
+
+    // QNS DIFF vs ensdomains/ens-contracts@v1.6.2: renounceOwnership always
+    // reverts. See vendored/DIFFS.md.
+    error RenounceOwnershipDisabled();
+
+    /// @notice Disabled. Ownership moves only through transferOwnership, so
+    ///         the default resolver and controller set always keep an owner.
+    function renounceOwnership() public pure override {
+        revert RenounceOwnershipDisabled();
+    }
 }

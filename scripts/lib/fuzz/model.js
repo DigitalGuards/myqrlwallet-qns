@@ -187,10 +187,8 @@ class Execution {
                 target.owner = args[0];
                 return true;
             case "renounceOwnership":
-                this.onlyOwner(contract, sender);
-                this.logs.push(log(address, [EVENT_TOPICS.OwnershipTransferred, word(target.owner), word(ZERO)]));
-                target.owner = ZERO;
-                return true;
+                // Root and ReverseRegistrar disable renunciation for every caller.
+                throw new Revert(errorData("RenounceOwnershipDisabled()", [], []));
             default:
                 return false;
         }
